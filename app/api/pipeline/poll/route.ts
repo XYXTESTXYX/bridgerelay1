@@ -27,9 +27,11 @@ export async function POST(req: NextRequest) {
     if (!res.ok) return NextResponse.json({ error: `Bridge returned HTTP ${res.status}` }, { status: 502 });
 
     const text = await res.text();
+
+    // 1. JSON Feed parser
     if (text.trim().startsWith('{')) {
       const parsed = JSON.parse(text);
-      const items = (parsed.items || []).slice(0, 20).map((entry, idx) => ({
+      const items: NormalizedFeedItem[] = (parsed.items || []).slice(0, 20).map((entry: Record<string, any>, idx: number) => ({
         guid: String(entry.id || entry.url || `${feedId}-${idx}`),
         hashId: computeDeterministicHash(String(entry.id || entry.url || `${feedId}-${idx}`)),
         feedId,
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
         rawHtml: String(entry.content_html || entry.summary || ''),
         cleanSummary: cleanHtmlToPlainText(String(entry.content_html || entry.summary || '')),
         link: String(entry.url || bridgeUrl),
-        author: entry.author?.name || 'author',
+        author: String(entry.author?.name || 'author'),
         publishedAt: String(entry.date_published || new Date().toISOString()),
         tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
         enclosures: [],
@@ -46,11 +48,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ items });
     }
 
+    // 2. XML / Atom / RSS parser
     const parsed = xmlParser.parse(text);
     const rawList = parsed?.rss?.channel?.item || parsed?.feed?.entry || [];
-    const entries = Array.isArray(rawList) ? rawList : [rawList];
+    const entries: Record<string, any>[] = Array.isArray(rawList) ? rawList : [rawList];
 
-    const items: NormalizedFeedItem[] = entries.slice(0, 20).map((entry, idx) => {
+    const items: NormalizedFeedItem[] = entries.slice(0, 20).map((entry: Record<string, any>, idx: number) => {
       const rawTitle = String(entry.title?.['#text'] || entry.title || 'Untitled Entry');
       const title = cleanHtmlToPlainText(rawTitle, false);
       const link = String(entry.link?.['@_href'] || entry.link || bridgeUrl);
