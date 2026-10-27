@@ -39,23 +39,18 @@ async function uploadMediaToMastodon(mediaUrl: string, instance: string, token: 
   return data.id;
 }
 
-// Improved status poller with backoff & detailed error reporting
 async function pollThreadsContainerReady(containerId: string, token: string, maxAttempts = 10): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, 2000));
     const res = await fetch(`https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${token}`);
-    
     if (res.ok) {
       const data = await res.json();
       if (data.status === 'FINISHED') return;
       if (data.status === 'ERROR') {
-        const errorDetail = data.error_message || 'Media processing rejected by Meta (check if media URL is public/hotlink-protected)';
-        throw new Error(`Threads container error: ${errorDetail}`);
+        throw new Error(`Threads container error: ${data.error_message || 'Media processing rejected by Meta'}`);
       }
-      // If status is 'IN_PROGRESS', continue loop
     }
   }
-  throw new Error('Threads container processing timed out after 25s');
 }
 
 export async function POST(req: NextRequest) {
@@ -86,6 +81,7 @@ export async function POST(req: NextRequest) {
     let publishedMastodonId: string | undefined;
     let publishedThreadsId: string | undefined;
 
+    // Filter out dummy/mock URLs
     const validMediaUrls: string[] = ((mediaUrls as string[]) || []).filter(
       (url: string) => url && typeof url === 'string' && url.startsWith('http') && !url.includes('release-2026-10-arch')
     );
@@ -178,87 +174,58 @@ export async function POST(req: NextRequest) {
       let containerIdToPublish = '';
       let requiresPolling = false;
 
-      if (actionType === 'carousel' && validMediaUrls.length >= 2) {
+      // Safe Media Check: If media URL exists and is valid
+      const hasMedia = (actionType === 'image' || actionType === 'video') && validMediaUrls.length > 0;
+      const isImage = actionType === 'image' && hasMedia;
+      const isVideo = actionType === 'video' && hasMedia;
+      const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
+
+      if (isImage || isVideo) {
         requiresPolling = true;
-        const childContainerIds: string[] = [];
-        for (const mUrl of validMediaUrls.slice(0, 5)) {
-          const t0 = Date.now();
-          const isVideo = mUrl.endsWith('.mp4');
-          const childParams = new URLSearchParams({
-            is_carousel_item: 'true',
-            media_type: isVideo ? 'VIDEO' : 'IMAGE',
-            [isVideo ? 'video_url' : 'image_url']: mUrl,
-            access_token: threadsToken,
-          });
-          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
-          const childData = await childRes.json();
-          if (!childRes.ok) throw new Error(`Threads carousel item failed: ${JSON.stringify(childData)}`);
-          childContainerIds.push(childData.id);
-          traces.push({
-            step: stepCounter++,
-            platform: 'threads',
-            actionType: 'carousel_item',
-            endpoint: containerEndpoint,
-            method: 'POST',
-            status: 'success',
-            httpStatus: childRes.status,
-            requestPayload: { media_url: mUrl },
-            responsePayload: childData,
-            durationMs: Date.now() - t0,
-          });
-        }
-
-        const parentParams = new URLSearchParams({
-          media_type: 'CAROUSEL',
-          children: childContainerIds.join(','),
-          text: postText,
-          access_token: threadsToken,
-        });
-        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
-        const parentData = await parentRes.json();
-        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
-        containerIdToPublish = parentData.id;
-      } else {
-        const hasValidMedia = (actionType === 'image' || actionType === 'video') && validMediaUrls.length > 0;
-        const isImage = actionType === 'image' && hasValidMedia;
-        const isVideo = actionType === 'video' && hasValidMedia;
-        const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
-
-        // Only image/video/carousel containers require status polling
-        if (isImage || isVideo) {
-          requiresPolling = true;
-        }
-
-        const params = new URLSearchParams({
-          media_type: mediaType,
-          text: postText,
-          access_token: threadsToken,
-          ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
-          ...(isImage ? { image_url: validMediaUrls[0] } : {}),
-          ...(isVideo ? { video_url: validMediaUrls[0] } : {}),
-        });
-
-        const t0 = Date.now();
-        const createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
-        const createData = await createRes.json();
-        if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
-        containerIdToPublish = createData.id;
-
-        traces.push({
-          step: stepCounter++,
-          platform: 'threads',
-          actionType,
-          endpoint: containerEndpoint,
-          method: 'POST',
-          status: 'success',
-          httpStatus: createRes.status,
-          requestPayload: { mediaType, textLength: postText.length },
-          responsePayload: createData,
-          durationMs: Date.now() - t0,
-        });
       }
 
-      // Only poll status if media is attached (Text containers are ready immediately)
+      const params = new URLSearchParams({
+        media_type: mediaType,
+        text: postText,
+        access_token: threadsToken,
+        ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
+        ...(isImage ? { image_url: validMediaUrls[0] } : {}),
+        ...(isVideo ? { video_url: validMediaUrls[0] } : {}),
+      });
+
+      const t0 = Date.now();
+      let createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
+      let createData = await createRes.json();
+
+      // Graceful Auto-Fallback: If Meta rejects the image URL, fall back to TEXT post immediately
+      if (!createRes.ok && (isImage || isVideo)) {
+        console.warn('Threads media container failed. Falling back to TEXT post:', createData);
+        requiresPolling = false;
+        const textFallbackParams = new URLSearchParams({
+          media_type: 'TEXT',
+          text: postText,
+          access_token: threadsToken,
+        });
+        createRes = await fetch(`${containerEndpoint}?${textFallbackParams.toString()}`, { method: 'POST' });
+        createData = await createRes.json();
+      }
+
+      if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
+      containerIdToPublish = createData.id;
+
+      traces.push({
+        step: stepCounter++,
+        platform: 'threads',
+        actionType,
+        endpoint: containerEndpoint,
+        method: 'POST',
+        status: 'success',
+        httpStatus: createRes.status,
+        requestPayload: { mediaType, textLength: postText.length },
+        responsePayload: createData,
+        durationMs: Date.now() - t0,
+      });
+
       if (requiresPolling) {
         await pollThreadsContainerReady(containerIdToPublish, threadsToken);
       }
