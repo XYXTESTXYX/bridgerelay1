@@ -171,7 +171,6 @@ export async function POST(req: NextRequest) {
               durationMs: Date.now() - t0,
             });
           } catch (mediaErr) {
-            // Gracefully log failed media download and continue with text post
             traces.push({
               step: stepCounter++,
               platform: 'mastodon',
@@ -239,52 +238,4 @@ export async function POST(req: NextRequest) {
       }
 
       const containerEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads`;
-      const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
-      const postText = threadsPosts[0];
-
-      let containerIdToPublish = '';
-
-      if (actionType === 'carousel' && validMediaUrls.length >= 2) {
-        const childContainerIds: string[] = [];
-        for (const mUrl of validMediaUrls.slice(0, 5)) {
-          const t0 = Date.now();
-          const isVideo = mUrl.endsWith('.mp4');
-          const childParams = new URLSearchParams({
-            is_carousel_item: 'true',
-            media_type: isVideo ? 'VIDEO' : 'IMAGE',
-            [isVideo ? 'video_url' : 'image_url']: mUrl,
-            access_token: threadsToken,
-          });
-
-          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
-          const childData = await childRes.json();
-          if (!childRes.ok) throw new Error(`Threads carousel child failed: ${JSON.stringify(childData)}`);
-          childContainerIds.push(childData.id);
-
-          traces.push({
-            step: stepCounter++,
-            platform: 'threads',
-            actionType: 'carousel_item',
-            endpoint: containerEndpoint,
-            method: 'POST',
-            status: 'success',
-            httpStatus: childRes.status,
-            requestPayload: { media_url: mUrl },
-            responsePayload: childData,
-            durationMs: Date.now() - t0,
-          });
-        }
-
-        const parentParams = new URLSearchParams({
-          media_type: 'CAROUSEL',
-          children: childContainerIds.join(','),
-          text: postText,
-          access_token: threadsToken,
-        });
-        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
-        const parentData = await parentRes.json();
-        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
-        containerIdToPublish = parentData.id;
-      } else {
-        const hasValidMedia = (actionType === 'image' || actionType === 'video') && validMediaUrls.length > 0;
-        const isImage = actionType === 'image' && ha
+      const publishEndpoint = `https://graph.threads.net/v1.0/${thread

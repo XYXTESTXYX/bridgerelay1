@@ -110,11 +110,18 @@ export default function BridgeRelayStudio() {
   );
   const [showUrlHelper, setShowUrlHelper] = useState<boolean>(false);
 
-  // Defaults to text to prevent 404 media errors on unseeded/text items
   const [selectedActionType, setSelectedActionType] = useState<SocialActionType>('text');
   const [actionLinkUrl, setActionLinkUrl] = useState<string>('{link}');
   const [actionMediaUrl, setActionMediaUrl] = useState<string>('');
   const [actionCarouselUrls, setActionCarouselUrls] = useState<string>('');
 
   const [envVars, setEnvVars] = useState<DashboardEnvVar[]>(INITIAL_DASHBOARD_ENV_VARS);
-  const [revealedSecrets, setRevealedSec
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+  const [statusBanner, setStatusBanner] = useState<string>('');
+
+  const [items, setItems] = useState<NormalizedFeedItem[]>(INITIAL_NORMALIZED_ITEMS);
+  const [selectedItemGuid, setSelectedItemGuid] = useState<string>(INITIAL_NORMALIZED_ITEMS[0]?.guid || '');
+  const [seenLedger, setSeenLedger] = useState<SeenEntry[]>(INITIAL_SEEN_STATE);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+  const [isConnectingThreads, setIsConnectingThreads] = useState<boolean>(false);
