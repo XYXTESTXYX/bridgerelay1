@@ -1,131 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { XMLParser } from 'fast-xml-parser';
+import {
+  cleanHtmlToPlainText,
+  computeDeterministicHash,
+  extractImagesFromHtml,
+  NormalizedFeedItem,
+} from '@/lib/pipeline-engine';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const searchParams = req.nextUrl.searchParams;
-  let code = searchParams.get('code');
-  const error = searchParams.get('error');
-  const errorDescription = searchParams.get('error_description');
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  trimValues: true,
+});
 
-  if (error || !code) {
-    const errorMsg = errorDescription || error || 'Authorization was cancelled or denied.';
-    return new NextResponse(
-      `<!DOCTYPE html><html><body>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({ type: 'THREADS_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
-            window.close();
-          } else {
-            document.body.innerText = 'Authorization failed: ' + ${JSON.stringify(errorMsg)};
-          }
-        </script>
-      </body></html>`,
-      { headers: { 'Content-Type': 'text/html' } }
-    );
-  }
-
-  // Meta often appends '#_' to the code, strip it if present
-  code = code.replace(/#_$/, '');
-
-  const host = req.headers.get('host') || 'localhost:3000';
-  const protocol = host.includes('localhost') ? 'http' : 'https';
-  const redirectUri = `${protocol}://${host}/api/auth/threads/callback`;
-
-  // Get App ID & Secret from cookie, query state, or server environment
-  const clientSecret = process.env.THREADS_APP_SECRET || '';
-  const clientId = process.env.THREADS_APP_ID || '';
-
+export async function POST(req: NextRequest) {
   try {
-    // 1. Exchange authorization code for Short-Lived Access Token & User ID
-    const tokenFormData = new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: 'authorization_code',
-      redirect_uri: redirectUri,
-      code,
+    const { feedId = 'feed-default', feedName = 'RSS Feed', bridgeUrl } = await req.json();
+    if (!bridgeUrl) return NextResponse.json({ error: 'bridgeUrl is required' }, { status: 400 });
+
+    const res = await fetch(bridgeUrl, {
+      headers: { 'User-Agent': 'BridgeRelay-Pipeline/2.0' },
+    });
+    if (!res.ok) return NextResponse.json({ error: `Bridge returned HTTP ${res.status}` }, { status: 502 });
+
+    const text = await res.text();
+    if (text.trim().startsWith('{')) {
+      const parsed = JSON.parse(text);
+      const items = (parsed.items || []).slice(0, 20).map((entry, idx) => ({
+        guid: String(entry.id || entry.url || `${feedId}-${idx}`),
+        hashId: computeDeterministicHash(String(entry.id || entry.url || `${feedId}-${idx}`)),
+        feedId,
+        feedName,
+        title: String(entry.title || 'Untitled Entry'),
+        rawHtml: String(entry.content_html || entry.summary || ''),
+        cleanSummary: cleanHtmlToPlainText(String(entry.content_html || entry.summary || '')),
+        link: String(entry.url || bridgeUrl),
+        author: entry.author?.name || 'author',
+        publishedAt: String(entry.date_published || new Date().toISOString()),
+        tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
+        enclosures: [],
+      }));
+      return NextResponse.json({ items });
+    }
+
+    const parsed = xmlParser.parse(text);
+    const rawList = parsed?.rss?.channel?.item || parsed?.feed?.entry || [];
+    const entries = Array.isArray(rawList) ? rawList : [rawList];
+
+    const items: NormalizedFeedItem[] = entries.slice(0, 20).map((entry, idx) => {
+      const rawTitle = String(entry.title?.['#text'] || entry.title || 'Untitled Entry');
+      const title = cleanHtmlToPlainText(rawTitle, false);
+      const link = String(entry.link?.['@_href'] || entry.link || bridgeUrl);
+      const guid = String(entry.guid?.['#text'] || entry.guid || entry.id || `${feedId}-${idx}`);
+      const rawHtml = String(entry['content:encoded'] || entry.content?.['#text'] || entry.description || '');
+
+      return {
+        guid,
+        hashId: computeDeterministicHash(guid),
+        feedId,
+        feedName,
+        title,
+        rawHtml,
+        cleanSummary: cleanHtmlToPlainText(rawHtml),
+        link,
+        author: 'bridge-author',
+        publishedAt: new Date().toISOString(),
+        tags: ['Syndicated'],
+        enclosures: extractImagesFromHtml(rawHtml),
+      };
     });
 
-    const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
-      method: 'POST',
-      body: tokenFormData,
-    });
-
-    const tokenData = await tokenRes.json();
-    if (!tokenRes.ok || !tokenData.access_token) {
-      throw new Error(tokenData.error_message || tokenData.error?.message || 'Failed to exchange authorization code');
-    }
-
-    const shortLivedToken = tokenData.access_token;
-    const userId = String(tokenData.user_id);
-
-    // 2. Exchange Short-Lived Token for 60-day Long-Lived Token
-    let finalAccessToken = shortLivedToken;
-    try {
-      const longLivedUrl = `https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=${clientSecret}&access_token=${shortLivedToken}`;
-      const longLivedRes = await fetch(longLivedUrl);
-      const longLivedData = await longLivedRes.json();
-      if (longLivedRes.ok && longLivedData.access_token) {
-        finalAccessToken = longLivedData.access_token;
-      }
-    } catch {
-      // Fallback to short-lived token if exchange failed
-    }
-
-    // 3. Fetch user profile handle
-    let username = userId;
-    try {
-      const userRes = await fetch(`https://graph.threads.net/v1.0/me?fields=id,username&access_token=${finalAccessToken}`);
-      if (userRes.ok) {
-        const userData = await userRes.json();
-        if (userData.username) username = userData.username;
-      }
-    } catch {
-      // Ignore profile fetch error
-    }
-
-    // Return HTML to post message to main window and self-close
-    return new NextResponse(
-      `<!DOCTYPE html>
-      <html>
-        <head><title>Threads Connected</title></head>
-        <body style="font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #000; color: #fff;">
-          <div style="text-align: center;">
-            <h2>Connected @${username}!</h2>
-            <p style="color: #888;">Saving credentials to BridgeRelay...</p>
-          </div>
-          <script>
-            const payload = {
-              type: 'THREADS_AUTH_SUCCESS',
-              userId: ${JSON.stringify(userId)},
-              accessToken: ${JSON.stringify(finalAccessToken)},
-              username: ${JSON.stringify(username)}
-            };
-            if (window.opener) {
-              window.opener.postMessage(payload, '*');
-              setTimeout(() => window.close(), 1000);
-            } else {
-              window.location.href = '/?threads_connected=true';
-            }
-          </script>
-        </body>
-      </html>`,
-      { headers: { 'Content-Type': 'text/html' } }
-    );
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'OAuth exchange failed';
-    return new NextResponse(
-      `<!DOCTYPE html><html><body>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({ type: 'THREADS_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
-            window.close();
-          } else {
-            alert(${JSON.stringify(errorMsg)});
-          }
-        </script>
-      </body></html>`,
-      { headers: { 'Content-Type': 'text/html' } }
-    );
+    return NextResponse.json({ items });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to poll feed' }, { status: 500 });
   }
 }
