@@ -580,4 +580,380 @@ export default function BridgeRelayStudio() {
                   type="button"
                   onClick={() => setActiveServiceTab(tab)}
                   className={`px-4 py-1.5 rounded-full capitalize transition ${
-                    activeServiceTab === tab ? 'bg-white text-slate-950 shadow-sm' : 'text-white/70 hover:text-whi
+                    activeServiceTab === tab ? 'bg-white text-slate-950 shadow-sm' : 'text-white/70 hover:text-white'
+                  }`}
+                >
+                  {tab === 'both' ? 'Both Destinations' : tab}
+                </button>
+              ))}
+            </div>
+
+            <h1 className="text-2xl font-black capitalize">
+              {activeServiceTab === 'both' ? 'Cross-Post Actions' : `${activeServiceTab} Actions`}
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">Select the action type to syndicate feed items</p>
+          </div>
+
+          <div className="max-w-4xl w-full mx-auto px-6 py-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {ACTION_CARDS.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedActionType(card.id);
+                    setFormatting((prev) => ({ ...prev, template: card.defaultTemplate }));
+                    setViewMode('edit_action');
+                  }}
+                  className={`bg-white border-2 text-left rounded-xl p-5 flex flex-col justify-between transition hover:shadow-md ${
+                    selectedActionType === card.id
+                      ? 'border-orange-600 bg-orange-50/20'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-orange-600">
+                      {card.id}
+                    </span>
+                    <h2 className="text-base font-black text-slate-950 mt-1 mb-2">{card.title}</h2>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {activeServiceTab === 'mastodon' ? card.mastodonDescription : card.threadsDescription}
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-900 pt-4 underline">Configure template →</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: EDIT ACTION */}
+      {viewMode === 'edit_action' && (
+        <div className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setViewMode('choose_action')}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-950"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Actions</span>
+            </button>
+            <h1 className="text-xl font-black">{currentActionDefinition.title}</h1>
+            <button
+              type="button"
+              onClick={() => setViewMode('applet_home')}
+              className="px-4 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-full"
+            >
+              Save & Return
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+              <h2 className="text-sm font-black text-slate-950">Post Template</h2>
+              <textarea
+                rows={6}
+                value={formatting.template}
+                onChange={(e) => setFormatting((prev) => ({ ...prev, template: e.target.value }))}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">
+                  Insert Variables
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {['{title}', '{summary}', '{link}', '{author}', '{source}', '{tags}', '{BRAND_SIGNATURE}', '{UTM_SUFFIX}'].map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      onClick={() => setFormatting((prev) => ({ ...prev, template: `${prev.template} ${tok}` }))}
+                      className="px-2 py-1 text-[11px] font-mono font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded border border-slate-200"
+                    >
+                      + {tok}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {selectedActionType === 'link' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Target Link URL</label>
+                  <input
+                    type="text"
+                    value={actionLinkUrl}
+                    onChange={(e) => setActionLinkUrl(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
+                  />
+                </div>
+              )}
+
+              {selectedActionType === 'image' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Fallback Image URL (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="https://example.com/fallback.jpg"
+                    value={actionMediaUrl}
+                    onChange={(e) => setActionMediaUrl(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
+                  />
+                </div>
+              )}
+
+              {selectedActionType === 'carousel' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Carousel Media URLs (comma-separated)</label>
+                  <textarea
+                    rows={2}
+                    placeholder="https://example.com/1.jpg, https://example.com/2.jpg"
+                    value={actionCarouselUrls}
+                    onChange={(e) => setActionCarouselUrls(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Live Preview */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+              <h2 className="text-sm font-black text-slate-950">Live Output Preview</h2>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-900">Meta Threads Post</span>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {threadsPreview?.effectiveCharCounts[0] || 0} / 500 chars
+                  </span>
+                </div>
+                <div className="text-xs whitespace-pre-wrap font-sans bg-white p-3 rounded-lg border border-slate-200">
+                  {threadsPreview?.posts[0] || 'No content rendered'}
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-purple-700">Mastodon Post</span>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {mastodonPreview?.effectiveCharCounts[0] || 0} / 500 chars
+                  </span>
+                </div>
+                <div className="text-xs whitespace-pre-wrap font-sans bg-white p-3 rounded-lg border border-slate-200">
+                  {mastodonPreview?.posts[0] || 'No content rendered'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: APPLET HOME */}
+      {viewMode === 'applet_home' && (
+        <div className="flex-1 max-w-3xl w-full mx-auto px-6 py-10 space-y-6">
+          <div className="text-center space-y-1">
+            <h1 className="text-3xl font-black text-slate-950">Syndication Pipeline</h1>
+            <p className="text-xs text-slate-500">Automated RSS-Bridge ingestion to Mastodon & Meta Threads</p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="bg-gradient-to-r from-[#EA7600] to-[#D66500] text-white rounded-2xl p-5 shadow-sm flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-[10px] font-black uppercase tracking-wider text-white/80">If This Trigger</div>
+                <div className="text-lg font-black">New item in RSS-Bridge feed</div>
+                <div className="text-xs font-mono text-white/90 truncate max-w-md">
+                  {resolveEnvVariablesInString(triggerFeedUrl, envVars)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('edit_trigger')}
+                className="px-4 py-2 bg-white text-slate-950 text-xs font-bold rounded-full hover:bg-slate-100 shadow-sm"
+              >
+                Edit
+              </button>
+            </div>
+
+            <div className="bg-slate-950 text-white rounded-2xl p-5 shadow-sm flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Then That Action</div>
+                <div className="text-lg font-black">{currentActionDefinition.title}</div>
+                <div className="text-xs text-slate-400">
+                  Targeting:{' '}
+                  <span className="font-semibold text-white capitalize">
+                    {activeServiceTab === 'both' ? 'Mastodon & Threads' : activeServiceTab}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('choose_action')}
+                className="px-4 py-2 bg-white text-slate-950 text-xs font-bold rounded-full hover:bg-slate-100 shadow-sm"
+              >
+                Change
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-center pt-2">
+            <button
+              type="button"
+              onClick={handleRunAppletNow}
+              disabled={isPublishing}
+              className="bg-slate-900 text-white font-black text-sm px-10 py-3.5 rounded-full hover:bg-slate-800 disabled:opacity-60 shadow-md inline-flex items-center gap-2"
+            >
+              {isPublishing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              <span>{isPublishing ? 'Executing Pipeline...' : 'Run Applet Now'}</span>
+            </button>
+          </div>
+
+          {publishTraces.length > 0 && (
+            <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-white shadow-sm">
+              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                Execution Log ({publishTraces.length} API Calls)
+              </h3>
+              <div className="space-y-1.5">
+                {publishTraces.map((t) => (
+                  <div
+                    key={t.step}
+                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center justify-between font-mono"
+                  >
+                    <span className="truncate max-w-sm">
+                      <strong className="uppercase font-bold text-slate-700">[{t.platform}]</strong> {t.endpoint}
+                    </span>
+                    <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      HTTP {t.httpStatus} ({t.durationMs}ms)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: CONNECTIONS & ENV */}
+      {viewMode === 'connections' && (
+        <div className="flex-1 max-w-4xl w-full mx-auto px-6 py-8 space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-black text-slate-950">Credentials & OAuth Connections</h1>
+              <p className="text-xs text-slate-500">Authorize Meta Threads with 1-click or configure Mastodon</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setViewMode('applet_home')}
+              className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-full"
+            >
+              Done
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-full bg-black text-white flex items-center justify-center font-black text-sm">
+                    @
+                  </span>
+                  <span className="font-bold text-sm">Meta Threads</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConnectThreads}
+                  disabled={isConnectingThreads}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${
+                    threadsUserId
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      : 'bg-black text-white hover:bg-neutral-800'
+                  }`}
+                >
+                  {isConnectingThreads ? 'Connecting...' : threadsUserId ? 'Reconnect' : 'Connect with Threads'}
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                {threadsUserId
+                  ? `Authorized User ID: ${threadsUserId}. Ready for auto-publishing.`
+                  : 'Requires THREADS_APP_ID below. Clicking opens the official Meta Threads OAuth login.'}
+              </p>
+            </div>
+
+            <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-xs">
+                    M
+                  </span>
+                  <span className="font-bold text-sm">Mastodon</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleVerifyCredential('mastodon')}
+                  disabled={verifyStatus.mastodon?.loading}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-full border border-slate-200"
+                >
+                  {verifyStatus.mastodon?.loading ? 'Checking...' : 'Test Connection'}
+                </button>
+              </div>
+
+              {verifyStatus.mastodon?.message && (
+                <div
+                  className={`text-xs flex items-center gap-1.5 ${
+                    verifyStatus.mastodon.verified ? 'text-emerald-700 font-semibold' : 'text-red-700'
+                  }`}
+                >
+                  {verifyStatus.mastodon.verified ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span>{verifyStatus.mastodon.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="p-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700">
+              API Keys & Configuration Store
+            </div>
+            <table className="w-full text-left text-xs">
+              <tbody className="divide-y divide-slate-100 font-mono">
+                {envVars.map((v) => (
+                  <tr key={v.id}>
+                    <td className="p-3 font-bold text-slate-900 w-1/3">
+                      <div>{v.key}</div>
+                      <div className="text-[10px] font-sans font-normal text-slate-500 mt-0.5">{v.description}</div>
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type={v.isSecret && !revealedSecrets[v.id] ? 'password' : 'text'}
+                        value={v.value}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          updateAndSaveEnvVars((prev) =>
+                            prev.map((item) => (item.id === v.id ? { ...item, value: val } : item))
+                          );
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
+                      />
+                    </td>
+                    <td className="p-3 text-right">
+                      {v.isSecret && (
+                        <button
+                          type="button"
+                          onClick={() => setRevealedSecrets((prev) => ({ ...prev, [v.id]: !prev[v.id] }))}
+                          className="p-1 text-slate-500 hover:text-slate-800"
+                        >
+                          {revealedSecrets[v.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
