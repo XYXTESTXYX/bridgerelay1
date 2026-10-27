@@ -1,46 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getActiveThreadsAccount, removeThreadsAccount, saveThreadsAccount, getSeenRecords } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const searchParams = req.nextUrl.searchParams;
-  let code = searchParams.get('code');
-  const error = searchParams.get('error');
-
-  if (error || !code) {
-    return new NextResponse('<script>window.close();</script>', { headers: { 'Content-Type': 'text/html' } });
+export async function GET() {
+  const account = getActiveThreadsAccount();
+  if (!account) {
+    return NextResponse.json({ connected: false, seenLedger: getSeenRecords().slice(0, 20) });
   }
 
-  code = code.replace(/#_$/, '');
-  const host = req.headers.get('host') || 'localhost:3000';
-  const protocol = host.includes('localhost') ? 'http' : 'https';
-  const redirectUri = `${protocol}://${host}/api/auth/threads/callback`;
+  // Return public account info only — never send tokens or secrets to the client
+  return NextResponse.json({
+    connected: true,
+    account: {
+      userId: account.userId,
+      username: account.username,
+      name: account.name,
+      profilePictureUrl: account.profilePictureUrl,
+      connectedAt: account.connectedAt,
+      autoPostEnabled: account.autoPostEnabled,
+      feedUrl: account.feedUrl,
+      lastPolledAt: account.lastPolledAt,
+      lastError: account.lastError,
+    },
+    seenLedger: getSeenRecords().slice(0, 20),
+  });
+}
 
-  try {
-    const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
-      method: 'POST',
-      body: new URLSearchParams({
-        client_id: process.env.THREADS_APP_ID || '',
-        client_secret: process.env.THREADS_APP_SECRET || '',
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code,
-      }),
-    });
-    const tokenData = await tokenRes.json();
-    const userId = String(tokenData.user_id);
-    const accessToken = tokenData.access_token;
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const account = getActiveThreadsAccount();
 
-    return new NextResponse(
-      `<script>
-        if (window.opener) {
-          window.opener.postMessage({ type: 'THREADS_AUTH_SUCCESS', userId: '${userId}', accessToken: '${accessToken}' }, '*');
-          window.close();
-        }
-      </script>`,
-      { headers: { 'Content-Type': 'text/html' } }
-    );
-  } catch {
-    return new NextResponse('<script>window.close();</script>', { headers: { 'Content-Type': 'text/html' } });
+  if (!account) {
+    return NextResponse.json({ error: 'No connected account' }, { status: 400 });
   }
+
+  if (body.action === 'disconnect') {
+    removeThreadsAccount(account.userId);
+    return NextResponse.json({ success: true, message: 'Account disconnected.' });
+  }
+
+  if (body.action === 'update_settings') {
+    if (typeof body.autoPostEnabled === 'boolean') account.autoPostEnabled = body.autoPostEnabled;
+    if (body.feedUrl) account.feedUrl = body.feedUrl;
+    saveThreadsAccount(account);
+    return NextResponse.json({ success: true, account });
+  }
+
+  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 }
