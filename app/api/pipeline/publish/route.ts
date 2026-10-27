@@ -39,16 +39,23 @@ async function uploadMediaToMastodon(mediaUrl: string, instance: string, token: 
   return data.id;
 }
 
-async function pollThreadsContainerReady(containerId: string, token: string, maxAttempts = 8): Promise<void> {
+// Improved status poller with backoff & detailed error reporting
+async function pollThreadsContainerReady(containerId: string, token: string, maxAttempts = 10): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((r) => setTimeout(r, 2500));
     const res = await fetch(`https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${token}`);
+    
     if (res.ok) {
       const data = await res.json();
       if (data.status === 'FINISHED') return;
-      if (data.status === 'ERROR') throw new Error(`Threads container error: ${data.error_message || 'Processing failed'}`);
+      if (data.status === 'ERROR') {
+        const errorDetail = data.error_message || 'Media processing rejected by Meta (check if media URL is public/hotlink-protected)';
+        throw new Error(`Threads container error: ${errorDetail}`);
+      }
+      // If status is 'IN_PROGRESS', continue loop
     }
-    await new Promise((r) => setTimeout(r, 2000));
   }
+  throw new Error('Threads container processing timed out after 25s');
 }
 
 export async function POST(req: NextRequest) {
@@ -79,7 +86,6 @@ export async function POST(req: NextRequest) {
     let publishedMastodonId: string | undefined;
     let publishedThreadsId: string | undefined;
 
-    // Explicitly typed (url: string)
     const validMediaUrls: string[] = ((mediaUrls as string[]) || []).filter(
       (url: string) => url && typeof url === 'string' && url.startsWith('http') && !url.includes('release-2026-10-arch')
     );
@@ -170,8 +176,10 @@ export async function POST(req: NextRequest) {
       const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
       const postText = threadsPosts[0];
       let containerIdToPublish = '';
+      let requiresPolling = false;
 
       if (actionType === 'carousel' && validMediaUrls.length >= 2) {
+        requiresPolling = true;
         const childContainerIds: string[] = [];
         for (const mUrl of validMediaUrls.slice(0, 5)) {
           const t0 = Date.now();
@@ -216,6 +224,11 @@ export async function POST(req: NextRequest) {
         const isVideo = actionType === 'video' && hasValidMedia;
         const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
 
+        // Only image/video/carousel containers require status polling
+        if (isImage || isVideo) {
+          requiresPolling = true;
+        }
+
         const params = new URLSearchParams({
           media_type: mediaType,
           text: postText,
@@ -245,7 +258,10 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+      // Only poll status if media is attached (Text containers are ready immediately)
+      if (requiresPolling) {
+        await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+      }
 
       const tPublish = Date.now();
       const pubParams = new URLSearchParams({ creation_id: containerIdToPublish, access_token: threadsToken });
