@@ -284,6 +284,42 @@ export function extractImagesFromHtml(html: string): MediaEnclosure[] {
   return results;
 }
 
+export function extractMediaFromHtml(html: string): MediaEnclosure[] {
+  if (!html) return [];
+  const results: MediaEnclosure[] = [];
+
+  // 1. Extract HTML5 <video> / <source> tags
+  const videoRegex = /<(?:video|source)[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  let vMatch: RegExpExecArray | null;
+  while ((vMatch = videoRegex.exec(html)) !== null) {
+    const url = vMatch[1];
+    if (url && (url.includes('.mp4') || url.includes('.mov') || url.includes('video'))) {
+      results.push({
+        url,
+        mimeType: 'video/mp4',
+        source: 'html_img',
+      });
+    }
+  }
+
+  // 2. Extract <img> tags
+  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = imgRegex.exec(html)) !== null) {
+    const url = match[1];
+    if (!url || url.startsWith('data:')) continue;
+    const altMatch = match[0].match(/alt=["']([^"']*)["']/i);
+    results.push({
+      url,
+      mimeType: url.endsWith('.png') ? 'image/png' : 'image/jpeg',
+      source: 'html_img',
+      altText: altMatch?.[1] || undefined,
+    });
+  }
+
+  return results;
+}
+
 export function evaluateFilterRules(
   item: NormalizedFeedItem,
   rules: FilterRulesConfig
