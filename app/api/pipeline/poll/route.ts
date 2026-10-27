@@ -1,122 +1,131 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isItemSeen } from '@/lib/db';
-import {
-  evaluateFilterRules,
-  renderFormattedPreview,
-  INITIAL_BRIDGE_FEEDS,
-  NormalizedFeedItem,
-  MediaEnclosure,
-} from '@/lib/pipeline-engine';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+  const searchParams = req.nextUrl.searchParams;
+  let code = searchParams.get('code');
+  const error = searchParams.get('error');
+  const errorDescription = searchParams.get('error_description');
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (error || !code) {
+    const errorMsg = errorDescription || error || 'Authorization was cancelled or denied.';
+    return new NextResponse(
+      `<!DOCTYPE html><html><body>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'THREADS_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
+            window.close();
+          } else {
+            document.body.innerText = 'Authorization failed: ' + ${JSON.stringify(errorMsg)};
+          }
+        </script>
+      </body></html>`,
+      { headers: { 'Content-Type': 'text/html' } }
+    );
   }
+
+  // Meta often appends '#_' to the code, strip it if present
+  code = code.replace(/#_$/, '');
 
   const host = req.headers.get('host') || 'localhost:3000';
   const protocol = host.includes('localhost') ? 'http' : 'https';
-  const baseUrl = `${protocol}://${host}`;
+  const redirectUri = `${protocol}://${host}/api/auth/threads/callback`;
 
-  const results = [];
+  // Get App ID & Secret from cookie, query state, or server environment
+  const clientSecret = process.env.THREADS_APP_SECRET || '';
+  const clientId = process.env.THREADS_APP_ID || '';
 
-  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
-    try {
-      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          feedId: feed.id,
-          feedName: feed.name,
-          bridgeUrl: feed.bridgeUrl.replace(
-            '{RSS_BRIDGE_BASE_URL}',
-            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
-          ),
-        }),
-      });
+  try {
+    // 1. Exchange authorization code for Short-Lived Access Token & User ID
+    const tokenFormData = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+      code,
+    });
 
-      if (!pollRes.ok) continue;
-      const data = (await pollRes.json()) as { items?: NormalizedFeedItem[] };
-      const items: NormalizedFeedItem[] = data.items || [];
+    const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
+      method: 'POST',
+      body: tokenFormData,
+    });
 
-      for (const item of items) {
-        if (isItemSeen(item.hashId)) continue;
-
-        const filterCheck = evaluateFilterRules(item, {
-          keywordWhitelist: [],
-          keywordBlacklist: ['sponsored', 'ad'],
-          regexPattern: '',
-          regexInvert: false,
-          authorWhitelist: [],
-          minContentLength: 10,
-          maxContentLength: 4000,
-          requireMediaAttachment: false,
-          stripHtmlPreserveBreaks: true,
-          extractInlineImages: true,
-        });
-
-        if (!filterCheck.passed) continue;
-
-        const mastoPreview = renderFormattedPreview(
-          item,
-          {
-            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
-            mastodonMaxChars: 500,
-            threadsMaxChars: 500,
-            mastodonCountUrlAs23Chars: true,
-            truncationStrategy: 'ellipsis',
-            includeMediaAttachment: true,
-            defaultHashtags: ['RSSBridge'],
-            mastodonVisibility: 'public',
-          },
-          'mastodon'
-        );
-
-        const threadsPreview = renderFormattedPreview(
-          item,
-          {
-            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
-            mastodonMaxChars: 500,
-            threadsMaxChars: 500,
-            mastodonCountUrlAs23Chars: true,
-            truncationStrategy: 'ellipsis',
-            includeMediaAttachment: true,
-            defaultHashtags: ['RSSBridge'],
-            mastodonVisibility: 'public',
-          },
-          'threads'
-        );
-
-        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            itemGuid: item.guid,
-            itemTitle: item.title,
-            feedId: feed.id,
-            platforms: ['mastodon', 'threads'],
-            actionType: item.enclosures.length > 0 ? 'image' : 'text',
-            mastodonPosts: mastoPreview.posts,
-            threadsPosts: threadsPreview.posts,
-            mediaUrls: item.enclosures.map((e: MediaEnclosure) => e.url),
-          }),
-        });
-
-        results.push({ item: item.title, published: pubRes.ok });
-        break;
-      }
-    } catch (e) {
-      console.error(`Cron error on feed ${feed.id}:`, e);
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_message || tokenData.error?.message || 'Failed to exchange authorization code');
     }
-  }
 
-  return NextResponse.json({
-    status: 'cron_completed',
-    processedAt: new Date().toISOString(),
-    results,
-  });
+    const shortLivedToken = tokenData.access_token;
+    const userId = String(tokenData.user_id);
+
+    // 2. Exchange Short-Lived Token for 60-day Long-Lived Token
+    let finalAccessToken = shortLivedToken;
+    try {
+      const longLivedUrl = `https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=${clientSecret}&access_token=${shortLivedToken}`;
+      const longLivedRes = await fetch(longLivedUrl);
+      const longLivedData = await longLivedRes.json();
+      if (longLivedRes.ok && longLivedData.access_token) {
+        finalAccessToken = longLivedData.access_token;
+      }
+    } catch {
+      // Fallback to short-lived token if exchange failed
+    }
+
+    // 3. Fetch user profile handle
+    let username = userId;
+    try {
+      const userRes = await fetch(`https://graph.threads.net/v1.0/me?fields=id,username&access_token=${finalAccessToken}`);
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        if (userData.username) username = userData.username;
+      }
+    } catch {
+      // Ignore profile fetch error
+    }
+
+    // Return HTML to post message to main window and self-close
+    return new NextResponse(
+      `<!DOCTYPE html>
+      <html>
+        <head><title>Threads Connected</title></head>
+        <body style="font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #000; color: #fff;">
+          <div style="text-align: center;">
+            <h2>Connected @${username}!</h2>
+            <p style="color: #888;">Saving credentials to BridgeRelay...</p>
+          </div>
+          <script>
+            const payload = {
+              type: 'THREADS_AUTH_SUCCESS',
+              userId: ${JSON.stringify(userId)},
+              accessToken: ${JSON.stringify(finalAccessToken)},
+              username: ${JSON.stringify(username)}
+            };
+            if (window.opener) {
+              window.opener.postMessage(payload, '*');
+              setTimeout(() => window.close(), 1000);
+            } else {
+              window.location.href = '/?threads_connected=true';
+            }
+          </script>
+        </body>
+      </html>`,
+      { headers: { 'Content-Type': 'text/html' } }
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'OAuth exchange failed';
+    return new NextResponse(
+      `<!DOCTYPE html><html><body>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'THREADS_AUTH_ERROR', error: ${JSON.stringify(errorMsg)} }, '*');
+            window.close();
+          } else {
+            alert(${JSON.stringify(errorMsg)});
+          }
+        </script>
+      </body></html>`,
+      { headers: { 'Content-Type': 'text/html' } }
+    );
+  }
 }

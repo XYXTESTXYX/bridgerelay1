@@ -101,8 +101,8 @@ const QUICK_BRIDGE_EXAMPLES = [
   },
 ];
 
-const STORAGE_KEY_ENV = 'bridgerelay_ifttt_env_v4';
-const STORAGE_KEY_TRIGGER_URL = 'bridgerelay_ifttt_trigger_url_v4';
+const STORAGE_KEY_ENV = 'bridgerelay_ifttt_env_v5';
+const STORAGE_KEY_TRIGGER_URL = 'bridgerelay_ifttt_trigger_url_v5';
 
 export default function BridgeRelayStudio() {
   const [viewMode, setViewMode] = useState<IftttViewMode>('applet_home');
@@ -133,6 +133,7 @@ export default function BridgeRelayStudio() {
   const [seenLedger, setSeenLedger] = useState<SeenEntry[]>(INITIAL_SEEN_STATE);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
+  const [isConnectingThreads, setIsConnectingThreads] = useState<boolean>(false);
 
   const [verifyStatus, setVerifyStatus] = useState<Record<string, { loading: boolean; verified?: boolean; message?: string }>>({});
 
@@ -149,6 +150,7 @@ export default function BridgeRelayStudio() {
 
   const [publishTraces, setPublishTraces] = useState<PublishStepTrace[]>([]);
 
+  // Load from local storage
   useEffect(() => {
     try {
       const savedEnv = localStorage.getItem(STORAGE_KEY_ENV);
@@ -163,6 +165,34 @@ export default function BridgeRelayStudio() {
     }
   }, []);
 
+  // Listen for OAuth message from Threads popup
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'THREADS_AUTH_SUCCESS') {
+        const { userId, accessToken, username } = event.data;
+        updateAndSaveEnvVars((prev) =>
+          prev.map((item) => {
+            if (item.key === 'THREADS_USER_ID') return { ...item, value: userId };
+            if (item.key === 'THREADS_ACCESS_TOKEN') return { ...item, value: accessToken };
+            return item;
+          })
+        );
+        setIsConnectingThreads(false);
+        setVerifyStatus((s) => ({
+          ...s,
+          threads: { loading: false, verified: true, message: `Connected as @${username}` },
+        }));
+        setStatusBanner(`Success! Connected Threads account @${username}`);
+      } else if (event.data?.type === 'THREADS_AUTH_ERROR') {
+        setIsConnectingThreads(false);
+        setStatusBanner(`Threads connection error: ${event.data.error}`);
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
+
   const updateAndSaveEnvVars = (updater: (prev: DashboardEnvVar[]) => DashboardEnvVar[]) => {
     setEnvVars((prev) => {
       const next = updater(prev);
@@ -173,8 +203,39 @@ export default function BridgeRelayStudio() {
       }
       return next;
     });
-    setStatusBanner('Credentials saved to local configuration');
+    setStatusBanner('Saved changes');
     setTimeout(() => setStatusBanner(''), 2500);
+  };
+
+  const threadsAppId = getEnvValue(envVars, 'THREADS_APP_ID', '');
+  const threadsUserId = getEnvValue(envVars, 'THREADS_USER_ID', '');
+
+  // 1-Click Threads Connect Popup
+  const handleConnectThreads = () => {
+    if (!threadsAppId) {
+      alert('Please enter your THREADS_APP_ID in the Credentials tab first.');
+      setViewMode('connections');
+      return;
+    }
+
+    setIsConnectingThreads(true);
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+
+    const popup = window.open(
+      `/api/auth/threads/login?client_id=${threadsAppId}`,
+      'ThreadsAuthorization',
+      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
+    );
+
+    const checkClosed = setInterval(() => {
+      if (!popup || popup.closed) {
+        clearInterval(checkClosed);
+        setIsConnectingThreads(false);
+      }
+    }, 1000);
   };
 
   const selectedItem = useMemo(() => {
@@ -223,9 +284,9 @@ export default function BridgeRelayStudio() {
         const incoming: NormalizedFeedItem[] = data.items;
         setItems(incoming);
         setSelectedItemGuid(incoming[0].guid);
-        setStatusBanner(`Success: Fetched ${incoming.length} normalized feed items`);
+        setStatusBanner(`Success: Loaded ${incoming.length} items`);
       } else {
-        setStatusBanner(data.error ? `Bridge note: ${data.error}` : 'Feed checked (0 items returned)');
+        setStatusBanner(data.error ? `Notice: ${data.error}` : 'Feed checked (0 items returned)');
       }
       setViewMode('applet_home');
     } catch (err) {
@@ -347,29 +408,10 @@ export default function BridgeRelayStudio() {
     }
   };
 
-  const handleAddCustomVar = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newVarKey.trim()) return;
-    const cleanKey = newVarKey.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
-    updateAndSaveEnvVars((prev) => [
-      ...prev,
-      {
-        id: `custom-${Date.now()}`,
-        key: cleanKey,
-        value: newVarValue,
-        description: 'User-defined variable',
-        isSecret: cleanKey.includes('TOKEN') || cleanKey.includes('SECRET') || cleanKey.includes('PASS'),
-        category: 'template',
-      },
-    ]);
-    setNewVarKey('');
-    setNewVarValue('');
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       {/* Top Navigation */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-4 px-6 lg:px-10 py-3.5 bg-white border-b border-slate-200">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-4 px-6 lg:px-10 py-3 bg-white border-b border-slate-200">
         <div className="flex items-center gap-3">
           <a
             href="#home"
@@ -379,14 +421,11 @@ export default function BridgeRelayStudio() {
             }}
             className="text-lg font-black tracking-tight text-slate-950 flex items-center gap-2"
           >
-            <span className="w-8 h-8 rounded-lg bg-orange-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+            <span className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
               BR
             </span>
             BridgeRelay
           </a>
-          <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 rounded">
-            v0.2.0
-          </span>
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-600">
@@ -395,7 +434,7 @@ export default function BridgeRelayStudio() {
             onClick={() => setViewMode('applet_home')}
             className={`py-1 border-b-2 transition ${viewMode === 'applet_home' ? 'border-slate-900 text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
-            Active Applet
+            Applet
           </button>
           <button
             type="button"
@@ -416,26 +455,49 @@ export default function BridgeRelayStudio() {
             onClick={() => setViewMode('edit_action')}
             className={`py-1 border-b-2 transition ${viewMode === 'edit_action' ? 'border-slate-900 text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
-            Template & Preview
+            Template
           </button>
           <button
             type="button"
             onClick={() => setViewMode('connections')}
             className={`py-1 border-b-2 transition ${viewMode === 'connections' ? 'border-slate-900 text-slate-950' : 'border-transparent hover:text-slate-900'}`}
           >
-            Credentials ({envVars.length})
+            Credentials & OAuth
           </button>
         </nav>
 
-        <button
-          type="button"
-          onClick={handleRunAppletNow}
-          disabled={isPublishing}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-slate-900 rounded-full hover:bg-slate-800 disabled:opacity-50 shadow-sm"
-        >
-          {isPublishing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-          <span>{isPublishing ? 'Publishing...' : 'Run Applet Now'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 1-Click Threads Connect Button */}
+          <button
+            type="button"
+            onClick={handleConnectThreads}
+            disabled={isConnectingThreads}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border shadow-sm transition ${
+              threadsUserId
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                : 'bg-black text-white border-black hover:bg-neutral-800'
+            }`}
+          >
+            <span className="font-extrabold text-xs">@</span>
+            <span>
+              {isConnectingThreads
+                ? 'Connecting...'
+                : threadsUserId
+                  ? 'Threads Connected'
+                  : 'Connect Threads'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRunAppletNow}
+            disabled={isPublishing}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-slate-900 rounded-full hover:bg-slate-800 disabled:opacity-50 shadow-sm"
+          >
+            {isPublishing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            <span>{isPublishing ? 'Publishing...' : 'Run Now'}</span>
+          </button>
+        </div>
       </header>
 
       {statusBanner && (
@@ -470,7 +532,7 @@ export default function BridgeRelayStudio() {
             <form onSubmit={handleUpdateTrigger} className="w-full space-y-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-white/80 mb-2">
-                  Feed URL (supports variables like {'{RSS_BRIDGE_BASE_URL}'})
+                  Feed URL
                 </label>
                 <textarea
                   rows={4}
@@ -490,7 +552,6 @@ export default function BridgeRelayStudio() {
 
               {showUrlHelper && (
                 <div className="bg-black/25 rounded-xl p-3 space-y-2">
-                  <div className="text-[11px] font-bold text-white/70">Click to use a preset:</div>
                   <div className="flex flex-wrap gap-2">
                     {QUICK_BRIDGE_EXAMPLES.map((ex) => (
                       <button
@@ -579,7 +640,7 @@ export default function BridgeRelayStudio() {
         </div>
       )}
 
-      {/* VIEW: EDIT ACTION & PREVIEW */}
+      {/* VIEW: EDIT ACTION */}
       {viewMode === 'edit_action' && (
         <div className="flex-1 max-w-5xl w-full mx-auto px-6 py-8 space-y-6">
           <div className="flex items-center justify-between">
@@ -602,7 +663,6 @@ export default function BridgeRelayStudio() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Template Editor */}
             <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
               <h2 className="text-sm font-black text-slate-950">Post Template</h2>
               <textarea
@@ -614,7 +674,7 @@ export default function BridgeRelayStudio() {
 
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1.5">
-                  Insert Variables / Ingredients
+                  Insert Variables
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {['{title}', '{summary}', '{link}', '{author}', '{source}', '{tags}', '{BRAND_SIGNATURE}', '{UTM_SUFFIX}'].map((tok) => (
@@ -629,77 +689,12 @@ export default function BridgeRelayStudio() {
                   ))}
                 </div>
               </div>
-
-              {selectedActionType === 'link' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Target Link URL</label>
-                  <input
-                    type="text"
-                    value={actionLinkUrl}
-                    onChange={(e) => setActionLinkUrl(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
-                  />
-                </div>
-              )}
-
-              {selectedActionType === 'image' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Fallback Image URL</label>
-                  <input
-                    type="text"
-                    value={actionMediaUrl}
-                    onChange={(e) => setActionMediaUrl(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
-                  />
-                </div>
-              )}
-
-              {selectedActionType === 'carousel' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Carousel Media URLs (comma-separated)</label>
-                  <textarea
-                    rows={2}
-                    value={actionCarouselUrls}
-                    onChange={(e) => setActionCarouselUrls(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono"
-                  />
-                </div>
-              )}
             </div>
 
             {/* Live Preview */}
             <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-black text-slate-950">Live Output Preview</h2>
-                {items.length > 1 && (
-                  <select
-                    value={selectedItemGuid}
-                    onChange={(e) => setSelectedItemGuid(e.target.value)}
-                    className="text-xs bg-slate-50 border border-slate-200 rounded p-1 max-w-[200px] truncate"
-                  >
-                    {items.map((i) => (
-                      <option key={i.guid} value={i.guid}>
-                        {i.title}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+              <h2 className="text-sm font-black text-slate-950">Live Output Preview</h2>
 
-              {/* Mastodon Preview */}
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-purple-700">Mastodon Post</span>
-                  <span className="font-mono text-[11px] text-slate-500">
-                    {mastodonPreview?.effectiveCharCounts[0] || 0} / 500 chars (URLs = 23)
-                  </span>
-                </div>
-                <div className="text-xs whitespace-pre-wrap font-sans bg-white p-3 rounded-lg border border-slate-200">
-                  {mastodonPreview?.posts[0] || 'No content rendered'}
-                </div>
-              </div>
-
-              {/* Threads Preview */}
               <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-900">Meta Threads Post</span>
@@ -709,6 +704,18 @@ export default function BridgeRelayStudio() {
                 </div>
                 <div className="text-xs whitespace-pre-wrap font-sans bg-white p-3 rounded-lg border border-slate-200">
                   {threadsPreview?.posts[0] || 'No content rendered'}
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-purple-700">Mastodon Post</span>
+                  <span className="font-mono text-[11px] text-slate-500">
+                    {mastodonPreview?.effectiveCharCounts[0] || 0} / 500 chars
+                  </span>
+                </div>
+                <div className="text-xs whitespace-pre-wrap font-sans bg-white p-3 rounded-lg border border-slate-200">
+                  {mastodonPreview?.posts[0] || 'No content rendered'}
                 </div>
               </div>
             </div>
@@ -777,7 +784,6 @@ export default function BridgeRelayStudio() {
             </button>
           </div>
 
-          {/* Execution traces log */}
           {publishTraces.length > 0 && (
             <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-white shadow-sm">
               <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">
@@ -800,23 +806,6 @@ export default function BridgeRelayStudio() {
               </div>
             </div>
           )}
-
-          {/* Ledger history */}
-          {seenLedger.length > 0 && (
-            <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-white shadow-sm">
-              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                Deduplication Ledger History
-              </h3>
-              <div className="space-y-1.5">
-                {seenLedger.map((s) => (
-                  <div key={s.guid} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs flex justify-between items-center">
-                    <span className="truncate max-w-md font-medium text-slate-800">{s.title}</span>
-                    <span className="text-[10px] font-bold uppercase text-slate-500">{s.status}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -825,8 +814,8 @@ export default function BridgeRelayStudio() {
         <div className="flex-1 max-w-4xl w-full mx-auto px-6 py-8 space-y-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-black text-slate-950">Credentials & Variables</h1>
-              <p className="text-xs text-slate-500">Configure tokens and endpoints used by the pipeline</p>
+              <h1 className="text-2xl font-black text-slate-950">Credentials & OAuth Connections</h1>
+              <p className="text-xs text-slate-500">Authorize Meta Threads with 1-click or configure Mastodon</p>
             </div>
             <button
               type="button"
@@ -837,52 +826,65 @@ export default function BridgeRelayStudio() {
             </button>
           </div>
 
-          {/* Verification section */}
+          {/* Quick OAuth Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+            {/* Threads 1-Click Card */}
+            <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-sm">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">Mastodon Connection</span>
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-full bg-black text-white flex items-center justify-center font-black text-sm">
+                    @
+                  </span>
+                  <span className="font-bold text-sm">Meta Threads</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleConnectThreads}
+                  disabled={isConnectingThreads}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${
+                    threadsUserId
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      : 'bg-black text-white hover:bg-neutral-800'
+                  }`}
+                >
+                  {isConnectingThreads ? 'Connecting...' : threadsUserId ? 'Reconnect' : 'Connect with Threads'}
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                {threadsUserId
+                  ? `Authorized User ID: ${threadsUserId}. Ready for auto-publishing.`
+                  : 'Requires THREADS_APP_ID below. Clicking opens the official Meta Threads OAuth login.'}
+              </p>
+            </div>
+
+            {/* Mastodon Credentials Card */}
+            <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-xs">
+                    M
+                  </span>
+                  <span className="font-bold text-sm">Mastodon</span>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleVerifyCredential('mastodon')}
                   disabled={verifyStatus.mastodon?.loading}
-                  className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold rounded"
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-full border border-slate-200"
                 >
-                  {verifyStatus.mastodon?.loading ? 'Checking...' : 'Verify Mastodon'}
+                  {verifyStatus.mastodon?.loading ? 'Checking...' : 'Test Connection'}
                 </button>
               </div>
+
               {verifyStatus.mastodon?.message && (
                 <div
                   className={`text-xs flex items-center gap-1.5 ${
-                    verifyStatus.mastodon.verified ? 'text-emerald-700' : 'text-red-700'
+                    verifyStatus.mastodon.verified ? 'text-emerald-700 font-semibold' : 'text-red-700'
                   }`}
                 >
-                  {verifyStatus.mastodon.verified ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  {verifyStatus.mastodon.verified ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                   <span>{verifyStatus.mastodon.message}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs">Meta Threads Connection</span>
-                <button
-                  type="button"
-                  onClick={() => handleVerifyCredential('threads')}
-                  disabled={verifyStatus.threads?.loading}
-                  className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold rounded"
-                >
-                  {verifyStatus.threads?.loading ? 'Checking...' : 'Verify Threads'}
-                </button>
-              </div>
-              {verifyStatus.threads?.message && (
-                <div
-                  className={`text-xs flex items-center gap-1.5 ${
-                    verifyStatus.threads.verified ? 'text-emerald-700' : 'text-red-700'
-                  }`}
-                >
-                  {verifyStatus.threads.verified ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                  <span>{verifyStatus.threads.message}</span>
                 </div>
               )}
             </div>
@@ -890,18 +892,17 @@ export default function BridgeRelayStudio() {
 
           {/* Variables table */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="p-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700">
+              API Keys & Configuration Store
+            </div>
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
-                <tr>
-                  <th className="p-3">Variable Key</th>
-                  <th className="p-3">Value</th>
-                  <th className="p-3 text-right">Actions</th>
-                </tr>
-              </thead>
               <tbody className="divide-y divide-slate-100 font-mono">
                 {envVars.map((v) => (
                   <tr key={v.id}>
-                    <td className="p-3 font-bold text-slate-900">{v.key}</td>
+                    <td className="p-3 font-bold text-slate-900 w-1/3">
+                      <div>{v.key}</div>
+                      <div className="text-[10px] font-sans font-normal text-slate-500 mt-0.5">{v.description}</div>
+                    </td>
                     <td className="p-3">
                       <input
                         type={v.isSecret && !revealedSecrets[v.id] ? 'password' : 'text'}
@@ -912,7 +913,7 @@ export default function BridgeRelayStudio() {
                             prev.map((item) => (item.id === v.id ? { ...item, value: val } : item))
                           );
                         }}
-                        className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
                       />
                     </td>
                     <td className="p-3 text-right">
@@ -931,30 +932,6 @@ export default function BridgeRelayStudio() {
               </tbody>
             </table>
           </div>
-
-          {/* Add custom variable */}
-          <form onSubmit={handleAddCustomVar} className="bg-white border border-slate-200 rounded-xl p-4 flex gap-3">
-            <input
-              type="text"
-              placeholder="VARIABLE_KEY"
-              value={newVarKey}
-              onChange={(e) => setNewVarKey(e.target.value)}
-              className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
-            />
-            <input
-              type="text"
-              placeholder="Value"
-              value={newVarValue}
-              onChange={(e) => setNewVarValue(e.target.value)}
-              className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
-            />
-            <button
-              type="submit"
-              className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg hover:bg-slate-800"
-            >
-              Add Variable
-            </button>
-          </form>
         </div>
       )}
     </div>
