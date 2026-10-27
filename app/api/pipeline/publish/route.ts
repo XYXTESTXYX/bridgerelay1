@@ -53,7 +53,7 @@ async function pollThreadsContainerReady(containerId: string, token: string, max
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body: any = await req.json();
     const {
       itemGuid,
       itemTitle = 'Feed Item',
@@ -79,8 +79,9 @@ export async function POST(req: NextRequest) {
     let publishedMastodonId: string | undefined;
     let publishedThreadsId: string | undefined;
 
-    const validMediaUrls = (mediaUrls || []).filter(
-      (url) => url && typeof url === 'string' && url.startsWith('http') && !url.includes('release-2026-10-arch')
+    // Explicitly typed (url: string)
+    const validMediaUrls: string[] = ((mediaUrls as string[]) || []).filter(
+      (url: string) => url && typeof url === 'string' && url.startsWith('http') && !url.includes('release-2026-10-arch')
     );
 
     // 1. Mastodon
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
         const t0 = Date.now();
         const postText = mastodonPosts[i];
         const statusEndpoint = `${mastodonInstance}/api/v1/statuses`;
-        const reqPayload = {
+        const reqPayload: Record<string, unknown> = {
           status: postText,
           visibility,
           ...(i === 0 && uploadedMediaIds.length > 0 ? { media_ids: uploadedMediaIds } : {}),
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify(reqPayload),
         });
         const resData = await res.json();
-        if (!res.ok) throw new Error(`Mastodon error (${res.status}): ${JSON.stringify(resData)}`);
+        if (!res.ok) throw new Error(`Mastodon status error (${res.status}): ${JSON.stringify(resData)}`);
 
         inReplyToId = String(resData.id);
         if (i === 0) publishedMastodonId = inReplyToId;
