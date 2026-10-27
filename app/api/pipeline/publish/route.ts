@@ -17,7 +17,7 @@ export interface PublishStepTrace {
   durationMs: number;
 }
 
-// Resolves a TikTok URL to a direct, unwatermarked MP4 video and high-res cover
+// Automatically resolves any TikTok web URL into a direct, unwatermarked MP4 file
 async function resolveTikTok(url: string): Promise<{ videoUrl?: string; coverUrl?: string; title?: string }> {
   try {
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
@@ -35,7 +35,7 @@ async function resolveTikTok(url: string): Promise<{ videoUrl?: string; coverUrl
       };
     }
   } catch (e) {
-    console.warn('TikTok resolver error:', e);
+    console.warn('TikTok resolver failed:', e);
   }
   return {};
 }
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
     const threadsUserId = (credentials?.threadsUserId || process.env.THREADS_USER_ID || '').trim();
     const threadsToken = (credentials?.threadsAccessToken || process.env.THREADS_ACCESS_TOKEN || '').trim();
 
-    // 1. TIKTOK AUTO-RESOLVER: Convert TikTok web URL into direct MP4 or Cover
+    // AUTO-RESOLVE TIKTOK: Convert the web link to a playable .mp4 URL
     const targetUrl = linkUrl || itemGuid || '';
     if (targetUrl.includes('tiktok.com/')) {
       const resolved = await resolveTikTok(targetUrl);
@@ -113,7 +113,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Clean valid media URLs
     const validMediaUrls: string[] = (mediaUrls || []).filter(
       (url: string) => url && typeof url === 'string' && url.startsWith('http') && !url.includes('release-2026-10-arch')
     );
@@ -121,7 +120,7 @@ export async function POST(req: NextRequest) {
     let publishedMastodonId: string | undefined;
     let publishedThreadsId: string | undefined;
 
-    // 2. Mastodon Publishing
+    // 1. Mastodon
     if (platforms.includes('mastodon') && mastodonPosts?.length > 0) {
       if (!mastodonToken) throw new Error('Mastodon access token is missing');
       const uploadedMediaIds: string[] = [];
@@ -162,7 +161,7 @@ export async function POST(req: NextRequest) {
       publishedMastodonId = String(resData.id);
     }
 
-    // 3. Meta Threads Publishing
+    // 2. Meta Threads
     if (platforms.includes('threads') && threadsPosts?.length > 0) {
       if (!threadsUserId || !threadsToken) throw new Error('Threads User ID or Access Token is missing');
 
@@ -202,12 +201,10 @@ export async function POST(req: NextRequest) {
         durationMs: Date.now() - t0,
       });
 
-      // Video containers MUST be polled until Meta finishes transcoding
       if (hasVideo || hasImage) {
         await pollThreadsContainerReady(containerId, threadsToken);
       }
 
-      // Publish Container
       const tPublish = Date.now();
       const pubParams = new URLSearchParams({ creation_id: containerId, access_token: threadsToken });
       const pubRes = await fetch(`${publishEndpoint}?${pubParams.toString()}`, { method: 'POST' });
