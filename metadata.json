@@ -1,0 +1,6 @@
+{
+  "name": "BridgeRelay — RSS-Bridge to Mastodon & Threads Pipeline",
+  "description": "End-to-end syndication pipeline for ingesting RSS-Bridge feeds, deduplicating state, applying regex and template formatting rules, and publishing to Mastodon and Meta Threads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
