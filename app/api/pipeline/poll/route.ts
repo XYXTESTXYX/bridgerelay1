@@ -3,7 +3,6 @@ import { XMLParser } from 'fast-xml-parser';
 import {
   cleanHtmlToPlainText,
   computeDeterministicHash,
-  extractImagesFromHtml,
   MediaEnclosure,
   NormalizedFeedItem,
 } from '@/lib/pipeline-engine';
@@ -17,9 +16,30 @@ const xmlParser = new XMLParser({
   trimValues: true,
 });
 
+// Resolves a TikTok web URL into direct MP4 video and cover image URLs
+async function resolveTikTokMedia(tiktokUrl: string): Promise<{ videoUrl?: string; coverUrl?: string; title?: string }> {
+  try {
+    const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(tiktokUrl)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BridgeRelay/2.0)' },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    if (json.code === 0 && json.data) {
+      return {
+        videoUrl: json.data.play || json.data.wmplay,
+        coverUrl: json.data.cover || json.data.origin_cover,
+        title: json.data.title,
+      };
+    }
+  } catch (err) {
+    console.warn(`Failed to resolve TikTok media for ${tiktokUrl}:`, err);
+  }
+  return {};
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { feedId = 'feed-default', feedName = 'TikTok Feed', bridgeUrl } = await req.json();
+    const { feedId = 'tiktok-feed', feedName = 'TikTok Feed', bridgeUrl } = await req.json();
     if (!bridgeUrl) return NextResponse.json({ error: 'bridgeUrl is required' }, { status: 400 });
 
     const res = await fetch(bridgeUrl, {
@@ -30,12 +50,15 @@ export async function POST(req: NextRequest) {
     const text = await res.text();
     const parsed = xmlParser.parse(text);
 
-    // Support Atom <feed><entry> and RSS <channel><item>
     const rawList = parsed?.feed?.entry || parsed?.rss?.channel?.item || [];
     const entries: Record<string, any>[] = Array.isArray(rawList) ? rawList : [rawList];
 
-    const items: NormalizedFeedItem[] = entries.slice(0, 20).map((entry: Record<string, any>, idx: number) => {
-      // 1. Extract clean canonical Link
+    // Process items (resolving TikTok MP4 video links)
+    const items: NormalizedFeedItem[] = [];
+
+    for (let idx = 0; idx < Math.min(entries.length, 10); idx++) {
+      const entry = entries[idx];
+
       let link = '';
       if (typeof entry.link === 'string') {
         link = entry.link;
@@ -47,55 +70,51 @@ export async function POST(req: NextRequest) {
       }
       if (!link) link = String(entry.id?.['#text'] || entry.id || bridgeUrl);
 
-      // 2. Extract Title and Content
       const rawTitle = String(entry.title?.['#text'] || entry.title || 'TikTok Video');
-      const title = cleanHtmlToPlainText(rawTitle, false);
+      let title = cleanHtmlToPlainText(rawTitle, false);
       const rawHtml = String(entry.content?.['#text'] || entry.content || entry['content:encoded'] || entry.description || '');
 
-      // 3. Extract Enclosures (Handling Atom <link rel="enclosure" href="...">)
       const enclosures: MediaEnclosure[] = [];
-      if (Array.isArray(entry.link)) {
-        for (const l of entry.link) {
-          if (l['@_rel'] === 'enclosure' && l['@_href']) {
-            const url = String(l['@_href']);
-            // Ignore tiny 100x100 avatar thumbnails that Meta Threads blocks
-            if (!url.includes('100:100')) {
-              enclosures.push({
-                url,
-                mimeType: l['@_type'] || 'image/jpeg',
-                source: 'enclosure',
-              });
-            }
-          }
-        }
-      }
 
-      // Also check standard RSS <enclosure>
-      if (entry.enclosure?.['@_url']) {
-        enclosures.push({
-          url: String(entry.enclosure['@_url']),
-          mimeType: entry.enclosure['@_type'] || 'image/jpeg',
-          source: 'enclosure',
-        });
+      // If it's a TikTok URL, resolve the real MP4 video and high-res cover
+      if (link.includes('tiktok.com/')) {
+        const resolved = await resolveTikTokMedia(link);
+        if (resolved.videoUrl) {
+          enclosures.push({
+            url: resolved.videoUrl,
+            mimeType: 'video/mp4',
+            source: 'enclosure',
+          });
+        }
+        if (resolved.coverUrl) {
+          enclosures.push({
+            url: resolved.coverUrl,
+            mimeType: 'image/jpeg',
+            source: 'enclosure',
+          });
+        }
+        if (resolved.title) {
+          title = resolved.title;
+        }
       }
 
       const guid = String(entry.id?.['#text'] || entry.id || link || `${feedId}-${idx}`);
 
-      return {
+      items.push({
         guid,
         hashId: computeDeterministicHash(guid),
         feedId,
         feedName,
-        title: title.startsWith('http') ? 'New TikTok Video' : title,
+        title: title.startsWith('http') ? 'TikTok Video' : title,
         rawHtml,
-        cleanSummary: cleanHtmlToPlainText(rawHtml),
+        cleanSummary: title,
         link,
         author: '@mollynailsind',
         publishedAt: String(entry.published || entry.updated || new Date().toISOString()),
-        tags: ['TikTok', 'Nails', 'Beauty'],
+        tags: ['TikTok', 'Reel', 'Viral'],
         enclosures,
-      };
-    });
+      });
+    }
 
     return NextResponse.json({ items });
   } catch (error) {
