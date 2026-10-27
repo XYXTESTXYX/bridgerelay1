@@ -1,0 +1,1 @@
+https://your-domain.vercel.app/api/cron

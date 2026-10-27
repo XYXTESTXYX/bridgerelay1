@@ -1,37 +1,694 @@
-# .aistudio\artifacts\brain\50bf7c09-8613-4e5d-8900-9476401851d8\.tempmediaStorage\media_1793060407655_11ceb0b4.png
-
-This is a binary file of the type: Image
-
-# .aistudio\artifacts\brain\50bf7c09-8613-4e5d-8900-9476401851d8\.tempmediaStorage\media_1793060408126_5eebba1d.png
-
-This is a binary file of the type: Image
-
-# .eslintrc.json
+# .ai_backups\20261027_013634_package.json
 
 ```json
 {
-  "extends": "next"
+  "name": "bridgerelay",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "next": "^15.4.9",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.3"
+  }
 }
-
 ```
 
-# .gitignore
+# .ai_backups\20261027_013641_package.json
 
+```json
+{
+  "name": "bridgerelay",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "next": "^15.4.9",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.3"
+  }
+}
 ```
-node_modules/
-.next/
-coverage/
-.DS_Store
-*.log
-.env*
-!.env.example
 
+# .ai_backups\20261027_013642_package.json
+
+```json
+{
+  "name": "bridgerelay",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "next": "^15.4.9",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.3"
+  }
+}
 ```
 
-# app\api\pipeline\poll\route.ts
+# .ai_backups\20261027_014211_app_api_pipeline_poll_route.ts
 
 ```ts
 import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const { items } = await pollRes.json();
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# .ai_backups\20261027_014211_app_api_pipeline_publish_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { markItemSeen } from '@/lib/db';
+import { computeDeterministicHash } from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export interface PublishStepTrace {
+  step: number;
+  platform: 'mastodon' | 'threads';
+  actionType?: string;
+  endpoint: string;
+  method: 'POST' | 'GET';
+  status: 'success' | 'error';
+  httpStatus: number;
+  requestPayload: Record<string, unknown>;
+  responsePayload: Record<string, unknown>;
+  durationMs: number;
+}
+
+async function uploadMediaToMastodon(
+  mediaUrl: string,
+  mastodonInstance: string,
+  token: string
+): Promise<string> {
+  const mediaRes = await fetch(mediaUrl);
+  if (!mediaRes.ok) throw new Error(`Failed to download media enclosure: ${mediaUrl}`);
+  const blob = await mediaRes.blob();
+
+  const formData = new FormData();
+  formData.append('file', blob, 'media.jpg');
+  formData.append('description', 'Syndicated via BridgeRelay');
+
+  const uploadRes = await fetch(`${mastodonInstance}/api/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Mastodon media upload failed (HTTP ${uploadRes.status}): ${errText}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  return uploadData.id;
+}
+
+async function pollThreadsContainerReady(
+  containerId: string,
+  threadsToken: string,
+  maxAttempts = 6
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const statusRes = await fetch(
+      `https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${threadsToken}`
+    );
+    if (statusRes.ok) {
+      const data = await statusRes.json();
+      if (data.status === 'FINISHED') return;
+      if (data.status === 'ERROR') {
+        throw new Error(`Threads container error: ${data.error_message || 'Container failed'}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      itemGuid,
+      itemTitle = 'Feed Item',
+      feedId = 'feed-default',
+      platforms,
+      actionType = 'text',
+      mastodonPosts,
+      threadsPosts,
+      linkUrl = '',
+      mediaUrls = [],
+      visibility = 'public',
+      credentials,
+    } = body as {
+      itemGuid?: string;
+      itemTitle?: string;
+      feedId?: string;
+      platforms: ('mastodon' | 'threads')[];
+      actionType?: 'text' | 'link' | 'image' | 'video' | 'carousel';
+      mastodonPosts: string[];
+      threadsPosts: string[];
+      linkUrl?: string;
+      mediaUrls?: string[];
+      visibility?: 'public' | 'unlisted' | 'private';
+      credentials?: {
+        mastodonInstanceUrl?: string;
+        mastodonAccessToken?: string;
+        threadsUserId?: string;
+        threadsAccessToken?: string;
+      };
+    };
+
+    const traces: PublishStepTrace[] = [];
+    let stepCounter = 1;
+
+    const mastodonInstance = (
+      credentials?.mastodonInstanceUrl ||
+      process.env.MASTODON_INSTANCE_URL ||
+      'https://mastodon.social'
+    ).replace(/\/$/, '');
+    const mastodonToken = (
+      credentials?.mastodonAccessToken ||
+      process.env.MASTODON_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    const threadsUserId = (
+      credentials?.threadsUserId ||
+      process.env.THREADS_USER_ID ||
+      ''
+    ).trim();
+    const threadsToken = (
+      credentials?.threadsAccessToken ||
+      process.env.THREADS_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    let publishedMastodonId: string | undefined;
+    let publishedThreadsId: string | undefined;
+
+    // 1. Mastodon
+    if (platforms.includes('mastodon') && mastodonPosts?.length > 0) {
+      if (!mastodonToken) throw new Error('Mastodon access token is missing');
+
+      const uploadedMediaIds: string[] = [];
+      if (
+        (actionType === 'image' || actionType === 'video' || actionType === 'carousel') &&
+        mediaUrls.length > 0
+      ) {
+        const mediaToUpload = actionType === 'carousel' ? mediaUrls.slice(0, 4) : [mediaUrls[0]];
+        for (const url of mediaToUpload) {
+          const t0 = Date.now();
+          const mediaId = await uploadMediaToMastodon(url, mastodonInstance, mastodonToken);
+          uploadedMediaIds.push(mediaId);
+          traces.push({
+            step: stepCounter++,
+            platform: 'mastodon',
+            actionType,
+            endpoint: `${mastodonInstance}/api/v2/media`,
+            method: 'POST',
+            status: 'success',
+            httpStatus: 200,
+            requestPayload: { file_url: url },
+            responsePayload: { id: mediaId },
+            durationMs: Date.now() - t0,
+          });
+        }
+      }
+
+      let inReplyToId: string | undefined;
+      for (let i = 0; i < mastodonPosts.length; i++) {
+        const postText = mastodonPosts[i];
+        const statusEndpoint = `${mastodonInstance}/api/v1/statuses`;
+        const reqPayload: Record<string, unknown> = {
+          status: postText,
+          visibility,
+          ...(i === 0 && uploadedMediaIds.length > 0 ? { media_ids: uploadedMediaIds } : {}),
+          ...(inReplyToId ? { in_reply_to_id: inReplyToId } : {}),
+        };
+
+        const t0 = Date.now();
+        const res = await fetch(statusEndpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${mastodonToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(reqPayload),
+        });
+        const resData = await res.json();
+
+        if (!res.ok) {
+          throw new Error(`Mastodon status error (HTTP ${res.status}): ${JSON.stringify(resData)}`);
+        }
+
+        inReplyToId = String(resData.id);
+        if (i === 0) publishedMastodonId = inReplyToId;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'mastodon',
+          actionType,
+          endpoint: statusEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: res.status,
+          requestPayload: reqPayload,
+          responsePayload: resData,
+          durationMs: Date.now() - t0,
+        });
+      }
+    }
+
+    // 2. Meta Threads
+    if (platforms.includes('threads') && threadsPosts?.length > 0) {
+      if (!threadsUserId || !threadsToken) {
+        throw new Error('Meta Threads User ID or Access Token is missing');
+      }
+
+      const containerEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads`;
+      const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
+      const postText = threadsPosts[0];
+
+      let containerIdToPublish = '';
+
+      if (actionType === 'carousel' && mediaUrls.length >= 2) {
+        const childContainerIds: string[] = [];
+        for (const mUrl of mediaUrls.slice(0, 5)) {
+          const t0 = Date.now();
+          const isVideo = mUrl.endsWith('.mp4');
+          const childParams = new URLSearchParams({
+            is_carousel_item: 'true',
+            media_type: isVideo ? 'VIDEO' : 'IMAGE',
+            [isVideo ? 'video_url' : 'image_url']: mUrl,
+            access_token: threadsToken,
+          });
+
+          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
+          const childData = await childRes.json();
+          if (!childRes.ok) throw new Error(`Threads carousel child failed: ${JSON.stringify(childData)}`);
+          childContainerIds.push(childData.id);
+
+          traces.push({
+            step: stepCounter++,
+            platform: 'threads',
+            actionType: 'carousel_item',
+            endpoint: containerEndpoint,
+            method: 'POST',
+            status: 'success',
+            httpStatus: childRes.status,
+            requestPayload: { media_url: mUrl },
+            responsePayload: childData,
+            durationMs: Date.now() - t0,
+          });
+        }
+
+        const parentParams = new URLSearchParams({
+          media_type: 'CAROUSEL',
+          children: childContainerIds.join(','),
+          text: postText,
+          access_token: threadsToken,
+        });
+        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
+        const parentData = await parentRes.json();
+        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
+        containerIdToPublish = parentData.id;
+      } else {
+        const isImage = actionType === 'image' && mediaUrls.length > 0;
+        const isVideo = actionType === 'video' && mediaUrls.length > 0;
+        const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
+
+        const params = new URLSearchParams({
+          media_type: mediaType,
+          text: postText,
+          access_token: threadsToken,
+          ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
+          ...(isImage ? { image_url: mediaUrls[0] } : {}),
+          ...(isVideo ? { video_url: mediaUrls[0] } : {}),
+        });
+
+        const t0 = Date.now();
+        const createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
+        const createData = await createRes.json();
+        if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
+        containerIdToPublish = createData.id;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'threads',
+          actionType,
+          endpoint: containerEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: createRes.status,
+          requestPayload: { mediaType, textLength: postText.length },
+          responsePayload: createData,
+          durationMs: Date.now() - t0,
+        });
+      }
+
+      await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+
+      const tPublish = Date.now();
+      const pubParams = new URLSearchParams({
+        creation_id: containerIdToPublish,
+        access_token: threadsToken,
+      });
+      const pubRes = await fetch(`${publishEndpoint}?${pubParams.toString()}`, { method: 'POST' });
+      const pubData = await pubRes.json();
+      if (!pubRes.ok) throw new Error(`Threads publish failed: ${JSON.stringify(pubData)}`);
+      publishedThreadsId = pubData.id;
+
+      traces.push({
+        step: stepCounter++,
+        platform: 'threads',
+        actionType,
+        endpoint: publishEndpoint,
+        method: 'POST',
+        status: 'success',
+        httpStatus: pubRes.status,
+        requestPayload: { creation_id: containerIdToPublish },
+        responsePayload: pubData,
+        durationMs: Date.now() - tPublish,
+      });
+    }
+
+    // Persist to server deduplication store
+    if (itemGuid) {
+      markItemSeen({
+        guidHash: computeDeterministicHash(itemGuid),
+        guid: itemGuid,
+        feedId,
+        title: itemTitle,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+        mastodonStatusId: publishedMastodonId,
+        threadsPostId: publishedThreadsId,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      executedAt: new Date().toISOString(),
+      traces,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Publish execution failed' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+# .ai_backups\20261027_014211_lib_db.ts
+
+```ts
+import fs from 'node:fs';
+import path from 'node:path';
+
+export interface PersistentSeenRecord {
+  guidHash: string;
+  guid: string;
+  feedId: string;
+  title: string;
+  status: 'published' | 'seeded' | 'filtered_out';
+  publishedAt: string;
+  mastodonStatusId?: string;
+  threadsPostId?: string;
+}
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'seen_ledger.json');
+
+function ensureStoreExists(): Record<string, PersistentSeenRecord> {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify({}), 'utf-8');
+    return {};
+  }
+  try {
+    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+export function isItemSeen(guidHash: string): boolean {
+  const store = ensureStoreExists();
+  return Boolean(store[guidHash]);
+}
+
+export function markItemSeen(record: PersistentSeenRecord): void {
+  const store = ensureStoreExists();
+  store[record.guidHash] = record;
+  fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+export function getSeenRecords(): PersistentSeenRecord[] {
+  const store = ensureStoreExists();
+  return Object.values(store).sort(
+    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+  );
+}
+```
+
+# .ai_backups\20261027_014211_package.json
+
+```json
+{
+  "name": "ai-studio-applet",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "clean": "next clean"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "@hookform/resolvers": "^5.2.1",
+    "autoprefixer": "^10.4.21",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "motion": "^12.23.24",
+    "next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.11",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.0.8",
+    "firebase-tools": "^15.0.0",
+    "tailwindcss": "4.1.11",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "5.9.3"
+  }
+}
+```
+
+# .ai_backups\20261027_014211_Vercel_Next.js
+
+```js
+https://your-domain.vercel.app/api/cron
+```
+
+# .ai_backups\20261027_014212_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { XMLParser } from 'fast-xml-parser';
 import {
   cleanHtmlToPlainText,
   computeDeterministicHash,
@@ -40,83 +697,109 @@ import {
   NormalizedFeedItem,
 } from '@/lib/pipeline-engine';
 
-function parseXmlFeed(xmlText: string, feedId: string, feedName: string): NormalizedFeedItem[] {
+export const dynamic = 'force-dynamic';
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  trimValues: true,
+  cdataPropName: '__cdata',
+});
+
+function getText(node: unknown): string {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if (obj.__cdata) return String(obj.__cdata);
+    if (obj['#text']) return String(obj['#text']);
+  }
+  return String(node);
+}
+
+export function parseXmlFeed(xmlText: string, feedId: string, feedName: string): NormalizedFeedItem[] {
   const items: NormalizedFeedItem[] = [];
+  const parsed = xmlParser.parse(xmlText);
 
-  // Match either <item>...</item> (RSS 2.0 / MRSS) or <entry>...</entry> (Atom)
-  const blockRegex = /<(item|entry)[\s>]([\s\S]*?)<\/\1>/gi;
-  let match: RegExpExecArray | null;
+  // 1. RSS 2.0 / MRSS channel items
+  let rawList = parsed?.rss?.channel?.item;
+  // 2. Atom feed entries
+  if (!rawList) {
+    rawList = parsed?.feed?.entry;
+  }
 
-  while ((match = blockRegex.exec(xmlText)) !== null && items.length < 15) {
-    const content = match[2];
+  if (!rawList) return [];
+  const entries = Array.isArray(rawList) ? rawList : [rawList];
 
-    const extractTag = (tag: string): string => {
-      const r = new RegExp(
-        `<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>|<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-        'i'
-      );
-      const m = content.match(r);
-      return (m?.[1] ?? m?.[2] ?? '').trim();
-    };
-
-    const rawTitle = extractTag('title') || 'Untitled Feed Entry';
+  for (const entry of entries.slice(0, 20)) {
+    const rawTitle = getText(entry.title) || 'Untitled Feed Entry';
     const title = cleanHtmlToPlainText(rawTitle, false);
 
-    // Extract link (RSS <link>url</link> or Atom <link href="url" />)
-    let link = extractTag('link');
-    if (!link) {
-      const hrefMatch = content.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/i);
-      link = hrefMatch?.[1] ?? '';
+    let link = '';
+    if (typeof entry.link === 'string') {
+      link = entry.link;
+    } else if (entry.link?.['@_href']) {
+      link = entry.link['@_href'];
+    } else if (Array.isArray(entry.link)) {
+      const alt = entry.link.find((l: Record<string, string>) => l['@_rel'] === 'alternate');
+      link = alt?.['@_href'] || entry.link[0]?.['@_href'] || getText(entry.link[0]);
     }
 
-    const guid = extractTag('guid') || extractTag('id') || link || `${feedId}-${title}`;
+    const rawGuid = getText(entry.guid) || getText(entry.id) || link || `${feedId}-${title}`;
     const rawHtml =
-      extractTag('content:encoded') ||
-      extractTag('content') ||
-      extractTag('summary') ||
-      extractTag('description') ||
+      getText(entry['content:encoded']) ||
+      getText(entry.content) ||
+      getText(entry.description) ||
+      getText(entry.summary) ||
       '';
 
     const author =
-      cleanHtmlToPlainText(extractTag('author') || extractTag('dc:creator'), false) ||
-      'bridge-author';
+      cleanHtmlToPlainText(
+        getText(entry.author?.name) || getText(entry.author) || getText(entry['dc:creator']),
+        false
+      ) || 'bridge-author';
 
     const pubDate =
-      extractTag('pubDate') ||
-      extractTag('published') ||
-      extractTag('updated') ||
+      getText(entry.pubDate) ||
+      getText(entry.published) ||
+      getText(entry.updated) ||
       new Date().toISOString();
 
     const tags: string[] = [];
-    const catRegex = /<category[^>]*(?:term=["']([^"']+)["'][^>]*\/?>|>([\s\S]*?)<\/category>)/gi;
-    let catMatch: RegExpExecArray | null;
-    while ((catMatch = catRegex.exec(content)) !== null) {
-      const catVal = cleanHtmlToPlainText(catMatch[1] || catMatch[2] || '', false);
-      if (catVal && tags.length < 6) tags.push(catVal);
+    const rawCats = entry.category;
+    if (rawCats) {
+      const catList = Array.isArray(rawCats) ? rawCats : [rawCats];
+      for (const cat of catList) {
+        const val = typeof cat === 'string' ? cat : cat['@_term'] || getText(cat);
+        if (val && tags.length < 6) tags.push(val);
+      }
     }
 
     const enclosures: MediaEnclosure[] = [];
-    const encRegex = /<enclosure[^>]+url=["']([^"']+)["'][^>]*>/gi;
-    let encMatch: RegExpExecArray | null;
-    while ((encMatch = encRegex.exec(content)) !== null) {
-      const typeMatch = encMatch[0].match(/type=["']([^"']+)["']/i);
-      enclosures.push({
-        url: encMatch[1],
-        mimeType: typeMatch?.[1] || 'image/jpeg',
-        source: 'enclosure',
-      });
+    const rawEnc = entry.enclosure;
+    if (rawEnc) {
+      const encList = Array.isArray(rawEnc) ? rawEnc : [rawEnc];
+      for (const enc of encList) {
+        if (enc?.['@_url']) {
+          enclosures.push({
+            url: enc['@_url'],
+            mimeType: enc['@_type'] || 'image/jpeg',
+            source: 'enclosure',
+          });
+        }
+      }
     }
 
-    const inlineImgs = extractImagesFromHtml(rawHtml);
-    for (const img of inlineImgs) {
+    for (const img of extractImagesFromHtml(rawHtml)) {
       if (!enclosures.some((e) => e.url === img.url)) {
         enclosures.push(img);
       }
     }
 
     items.push({
-      guid,
-      hashId: computeDeterministicHash(guid),
+      guid: rawGuid,
+      hashId: computeDeterministicHash(rawGuid),
       feedId,
       feedName,
       title,
@@ -149,105 +832,78 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6500);
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
-    try {
-      const res = await fetch(bridgeUrl, {
-        headers: {
-          'User-Agent': 'BridgeRelay-Pipeline/1.0 (+https://rss-bridge.org)',
-          Accept: 'application/json, application/atom+xml, application/rss+xml, text/xml, */*',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+    const res = await fetch(bridgeUrl, {
+      headers: {
+        'User-Agent': 'BridgeRelay-Pipeline/2.0 (+https://rss-bridge.org)',
+        Accept: 'application/json, application/atom+xml, application/rss+xml, text/xml, */*',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-      if (res.ok) {
-        const text = await res.text();
-        // Check if JSON format (RSS-Bridge &format=Json / JSON Feed)
-        if (text.trim().startsWith('{')) {
-          const parsed = JSON.parse(text);
-          const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
-          const normalized: NormalizedFeedItem[] = rawItems.slice(0, 15).map((entry: Record<string, unknown>, idx: number) => {
-            const guid = String(entry.id || entry.url || `${feedId}-${idx}`);
-            const rawHtml = String(entry.content_html || entry.content_text || entry.summary || '');
-            const enclosures: MediaEnclosure[] = [];
-
-            if (Array.isArray(entry.attachments)) {
-              for (const att of entry.attachments) {
-                if (att && typeof att === 'object' && 'url' in att) {
-                  enclosures.push({
-                    url: String((att as { url: string }).url),
-                    mimeType: String((att as { mime_type?: string }).mime_type || 'image/jpeg'),
-                    source: 'enclosure',
-                  });
-                }
-              }
-            }
-            for (const img of extractImagesFromHtml(rawHtml)) {
-              if (!enclosures.some((e) => e.url === img.url)) enclosures.push(img);
-            }
-
-            const authorObj = entry.author as { name?: string } | undefined;
-            return {
-              guid,
-              hashId: computeDeterministicHash(guid),
-              feedId,
-              feedName,
-              title: cleanHtmlToPlainText(String(entry.title || 'Untitled Entry'), false),
-              rawHtml,
-              cleanSummary: cleanHtmlToPlainText(rawHtml, true),
-              link: String(entry.url || bridgeUrl),
-              author: authorObj?.name || 'bridge-author',
-              publishedAt: String(entry.date_modified || entry.date_published || new Date().toISOString()),
-              tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
-              enclosures,
-            };
-          });
-
-          if (normalized.length > 0) {
-            return NextResponse.json({
-              source: 'live_bridge',
-              items: normalized,
-              polledAt: new Date().toISOString(),
-            });
-          }
-        } else {
-          const xmlItems = parseXmlFeed(text, feedId, feedName);
-          if (xmlItems.length > 0) {
-            return NextResponse.json({
-              source: 'live_bridge',
-              items: xmlItems,
-              polledAt: new Date().toISOString(),
-            });
-          }
-        }
-      }
-    } catch {
-      clearTimeout(timeout);
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: `Upstream bridge returned HTTP ${res.status}: ${res.statusText}` },
+        { status: 502 }
+      );
     }
 
-    // Deterministic synthetic item when external bridge host is offline or rate-limited
-    const timestamp = new Date().toISOString();
-    const syntheticGuid = `${bridgeUrl}#entry-${Date.now()}`;
-    const fallbackItem: NormalizedFeedItem = {
-      guid: syntheticGuid,
-      hashId: computeDeterministicHash(syntheticGuid),
-      feedId,
-      feedName,
-      title: `[Bridge Poll] Incremental Snapshot from ${feedName}`,
-      rawHtml: `<p>Polled <code>${bridgeUrl}</code>. Extracted normalized Atom/JSON entry with clean line breaks and ETag state verification.</p>`,
-      cleanSummary: `Polled ${bridgeUrl}. Extracted normalized Atom/JSON entry with clean line breaks and ETag state verification.`,
-      link: bridgeUrl.split('?')[0] || 'https://rss-bridge.org',
-      author: 'rss-bridge-poller',
-      publishedAt: timestamp,
-      tags: ['RSSBridge', 'Automation', 'Syndication'],
-      enclosures: [],
-    };
+    const text = await res.text();
 
+    if (text.trim().startsWith('{')) {
+      const parsed = JSON.parse(text);
+      const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+      const normalized: NormalizedFeedItem[] = rawItems.slice(0, 20).map((entry: Record<string, unknown>, idx: number) => {
+        const guid = String(entry.id || entry.url || `${feedId}-${idx}`);
+        const rawHtml = String(entry.content_html || entry.content_text || entry.summary || '');
+        const enclosures: MediaEnclosure[] = [];
+
+        if (Array.isArray(entry.attachments)) {
+          for (const att of entry.attachments) {
+            if (att && typeof att === 'object' && 'url' in att) {
+              enclosures.push({
+                url: String((att as { url: string }).url),
+                mimeType: String((att as { mime_type?: string }).mime_type || 'image/jpeg'),
+                source: 'enclosure',
+              });
+            }
+          }
+        }
+        for (const img of extractImagesFromHtml(rawHtml)) {
+          if (!enclosures.some((e) => e.url === img.url)) enclosures.push(img);
+        }
+
+        const authorObj = entry.author as { name?: string } | undefined;
+        return {
+          guid,
+          hashId: computeDeterministicHash(guid),
+          feedId,
+          feedName,
+          title: cleanHtmlToPlainText(String(entry.title || 'Untitled Entry'), false),
+          rawHtml,
+          cleanSummary: cleanHtmlToPlainText(rawHtml, true),
+          link: String(entry.url || bridgeUrl),
+          author: authorObj?.name || 'bridge-author',
+          publishedAt: String(entry.date_modified || entry.date_published || new Date().toISOString()),
+          tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
+          enclosures,
+        };
+      });
+
+      return NextResponse.json({
+        source: 'live_bridge',
+        items: normalized,
+        polledAt: new Date().toISOString(),
+      });
+    }
+
+    const xmlItems = parseXmlFeed(text, feedId, feedName);
     return NextResponse.json({
-      source: 'simulated_bridge_poll',
-      items: [fallbackItem],
-      polledAt: timestamp,
+      source: 'live_bridge',
+      items: xmlItems,
+      polledAt: new Date().toISOString(),
     });
   } catch (error) {
     return NextResponse.json(
@@ -256,31 +912,85 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
 ```
 
-# app\api\pipeline\publish\route.ts
+# .ai_backups\20261027_014212_app_api_pipeline_publish_route.ts
 
 ```ts
 import { NextRequest, NextResponse } from 'next/server';
+import { markItemSeen } from '@/lib/db';
+import { computeDeterministicHash } from '@/lib/pipeline-engine';
 
 export interface PublishStepTrace {
   step: number;
   platform: 'mastodon' | 'threads';
   actionType?: string;
   endpoint: string;
-  method: 'POST';
-  status: 'success' | 'dry_run_verified' | 'error';
+  method: 'POST' | 'GET';
+  status: 'success' | 'error';
   httpStatus: number;
   requestPayload: Record<string, unknown>;
   responsePayload: Record<string, unknown>;
   durationMs: number;
 }
 
+// Download remote image buffer and upload as multipart/form-data to Mastodon
+async function uploadMediaToMastodon(
+  mediaUrl: string,
+  mastodonInstance: string,
+  token: string
+): Promise<string> {
+  const mediaRes = await fetch(mediaUrl);
+  if (!mediaRes.ok) throw new Error(`Failed to fetch media from enclosure: ${mediaUrl}`);
+  const blob = await mediaRes.blob();
+
+  const formData = new FormData();
+  formData.append('file', blob, 'attachment.jpg');
+  formData.append('description', 'Syndicated via BridgeRelay');
+
+  const uploadRes = await fetch(`${mastodonInstance}/api/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Mastodon media upload failed (HTTP ${uploadRes.status}): ${errText}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  return uploadData.id;
+}
+
+// Poll Threads container status until FINISHED or ERROR
+async function pollThreadsContainerReady(
+  containerId: string,
+  threadsToken: string,
+  maxAttempts = 5
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const statusRes = await fetch(
+      `https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${threadsToken}`
+    );
+    if (statusRes.ok) {
+      const data = await statusRes.json();
+      if (data.status === 'FINISHED') return;
+      if (data.status === 'ERROR') {
+        throw new Error(`Threads container processing failed: ${data.error_message || 'Unknown error'}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
+      itemGuid,
+      itemTitle = 'Feed Item',
+      feedId = 'feed-default',
       platforms,
       actionType = 'text',
       mastodonPosts,
@@ -288,9 +998,11 @@ export async function POST(req: NextRequest) {
       linkUrl = '',
       mediaUrls = [],
       visibility = 'public',
-      dryRun = false,
       credentials,
     } = body as {
+      itemGuid?: string;
+      itemTitle?: string;
+      feedId?: string;
       platforms: ('mastodon' | 'threads')[];
       actionType?: 'text' | 'link' | 'image' | 'video' | 'carousel';
       mastodonPosts: string[];
@@ -298,7 +1010,6 @@ export async function POST(req: NextRequest) {
       linkUrl?: string;
       mediaUrls?: string[];
       visibility?: 'public' | 'unlisted' | 'private';
-      dryRun?: boolean;
       credentials?: {
         mastodonInstanceUrl?: string;
         mastodonAccessToken?: string;
@@ -324,7 +1035,7 @@ export async function POST(req: NextRequest) {
     const threadsUserId = (
       credentials?.threadsUserId ||
       process.env.THREADS_USER_ID ||
-      '17841405829304918'
+      ''
     ).trim();
     const threadsToken = (
       credentials?.threadsAccessToken ||
@@ -332,17 +1043,22 @@ export async function POST(req: NextRequest) {
       ''
     ).trim();
 
-    // 1. Mastodon Publisher Execution
-    if (platforms.includes('mastodon') && mastodonPosts.length > 0) {
-      const uploadedMediaIds: string[] = [];
+    let publishedMastodonId: string | undefined;
+    let publishedThreadsId: string | undefined;
 
+    // 1. Mastodon Publishing
+    if (platforms.includes('mastodon') && mastodonPosts.length > 0) {
+      if (!mastodonToken) throw new Error('Mastodon access token is missing');
+
+      const uploadedMediaIds: string[] = [];
       if (
         (actionType === 'image' || actionType === 'video' || actionType === 'carousel') &&
         mediaUrls.length > 0
       ) {
         const mediaToUpload = actionType === 'carousel' ? mediaUrls.slice(0, 4) : [mediaUrls[0]];
-        for (let mIdx = 0; mIdx < mediaToUpload.length; mIdx++) {
-          const mediaId = `masto_media_${Date.now().toString().slice(-5)}${mIdx}`;
+        for (const url of mediaToUpload) {
+          const t0 = Date.now();
+          const mediaId = await uploadMediaToMastodon(url, mastodonInstance, mastodonToken);
           uploadedMediaIds.push(mediaId);
           traces.push({
             step: stepCounter++,
@@ -350,19 +1066,11 @@ export async function POST(req: NextRequest) {
             actionType,
             endpoint: `${mastodonInstance}/api/v2/media`,
             method: 'POST',
-            status: !dryRun && mastodonToken ? 'success' : 'dry_run_verified',
-            httpStatus: 202,
-            requestPayload: {
-              file_source_url: mediaToUpload[mIdx],
-              media_type: actionType === 'video' ? 'video/mp4' : 'image/jpeg',
-              description: 'Syndicated media from RSS-Bridge IFTTT Applet',
-            },
-            responsePayload: {
-              id: mediaId,
-              type: actionType === 'video' ? 'video' : 'image',
-              url: mediaToUpload[mIdx],
-            },
-            durationMs: 132 + mIdx * 20,
+            status: 'success',
+            httpStatus: 200,
+            requestPayload: { file_url: url },
+            responsePayload: { id: mediaId },
+            durationMs: Date.now() - t0,
           });
         }
       }
@@ -378,172 +1086,113 @@ export async function POST(req: NextRequest) {
           ...(inReplyToId ? { in_reply_to_id: inReplyToId } : {}),
         };
 
-        if (!dryRun && mastodonToken) {
-          const t0 = Date.now();
-          try {
-            const res = await fetch(statusEndpoint, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${mastodonToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(reqPayload),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (res.ok) {
-              inReplyToId = data.id ? String(data.id) : undefined;
-              traces.push({
-                step: stepCounter++,
-                platform: 'mastodon',
-                actionType,
-                endpoint: statusEndpoint,
-                method: 'POST',
-                status: 'success',
-                httpStatus: res.status,
-                requestPayload: reqPayload,
-                responsePayload: data,
-                durationMs: Date.now() - t0,
-              });
-              continue;
-            }
-          } catch {
-            // Fall through to simulated response if outbound call blocked
-          }
+        const t0 = Date.now();
+        const res = await fetch(statusEndpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${mastodonToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(reqPayload),
+        });
+        const resData = await res.json();
+
+        if (!res.ok) {
+          throw new Error(`Mastodon status failed (HTTP ${res.status}): ${JSON.stringify(resData)}`);
         }
 
-        const simulatedId = `1133950${Date.now().toString().slice(-5)}${i}`;
-        inReplyToId = simulatedId;
+        inReplyToId = String(resData.id);
+        if (i === 0) publishedMastodonId = inReplyToId;
+
         traces.push({
           step: stepCounter++,
           platform: 'mastodon',
           actionType,
           endpoint: statusEndpoint,
           method: 'POST',
-          status: mastodonToken && !dryRun ? 'success' : 'dry_run_verified',
-          httpStatus: 200,
+          status: 'success',
+          httpStatus: res.status,
           requestPayload: reqPayload,
-          responsePayload: {
-            id: simulatedId,
-            created_at: new Date().toISOString(),
-            visibility,
-            uri: `${mastodonInstance}/users/bridgerelay/statuses/${simulatedId}`,
-          },
-          durationMs: 88 + i * 12,
+          responsePayload: resData,
+          durationMs: Date.now() - t0,
         });
       }
     }
 
-    // 2. Meta Threads Publisher Execution (Supports TEXT, LINK attachment, IMAGE, VIDEO, CAROUSEL)
+    // 2. Meta Threads Publishing (Real Graph API)
     if (platforms.includes('threads') && threadsPosts.length > 0) {
+      if (!threadsUserId || !threadsToken) {
+        throw new Error('Meta Threads User ID or Access Token is missing');
+      }
+
       const containerEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads`;
       const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
       const postText = threadsPosts[0];
 
-      if (actionType === 'carousel') {
-        const itemsToUse =
-          mediaUrls.length >= 2
-            ? mediaUrls.slice(0, 5)
-            : [
-                mediaUrls[0] || 'https://rss-bridge.org/static/slide-1.jpg',
-                'https://rss-bridge.org/static/slide-2.jpg',
-              ];
-        const childContainerIds: string[] = [];
+      let containerIdToPublish = '';
 
-        // Step 1a: Create child item containers (is_carousel_item=true)
-        for (let idx = 0; idx < itemsToUse.length; idx++) {
-          const childId = `1798900123${idx}`;
-          childContainerIds.push(childId);
+      if (actionType === 'carousel' && mediaUrls.length >= 2) {
+        const childContainerIds: string[] = [];
+        for (const mUrl of mediaUrls.slice(0, 5)) {
+          const t0 = Date.now();
+          const isVideo = mUrl.endsWith('.mp4');
+          const childParams = new URLSearchParams({
+            is_carousel_item: 'true',
+            media_type: isVideo ? 'VIDEO' : 'IMAGE',
+            [isVideo ? 'video_url' : 'image_url']: mUrl,
+            access_token: threadsToken,
+          });
+
+          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
+          const childData = await childRes.json();
+          if (!childRes.ok) throw new Error(`Threads carousel child failed: ${JSON.stringify(childData)}`);
+          childContainerIds.push(childData.id);
+
           traces.push({
             step: stepCounter++,
             platform: 'threads',
             actionType: 'carousel_item',
             endpoint: containerEndpoint,
             method: 'POST',
-            status: threadsToken && !dryRun ? 'success' : 'dry_run_verified',
-            httpStatus: 200,
-            requestPayload: {
-              is_carousel_item: true,
-              media_type: itemsToUse[idx].endsWith('.mp4') ? 'VIDEO' : 'IMAGE',
-              [itemsToUse[idx].endsWith('.mp4') ? 'video_url' : 'image_url']: itemsToUse[idx],
-            },
-            responsePayload: {
-              id: childId,
-              container_status: 'FINISHED',
-            },
-            durationMs: 95 + idx * 14,
+            status: 'success',
+            httpStatus: childRes.status,
+            requestPayload: { media_url: mUrl },
+            responsePayload: childData,
+            durationMs: Date.now() - t0,
           });
         }
 
-        // Step 1b: Create parent CAROUSEL container
-        const carouselContainerId = `1798999888777`;
-        traces.push({
-          step: stepCounter++,
-          platform: 'threads',
-          actionType: 'carousel',
-          endpoint: containerEndpoint,
-          method: 'POST',
-          status: threadsToken && !dryRun ? 'success' : 'dry_run_verified',
-          httpStatus: 200,
-          requestPayload: {
-            media_type: 'CAROUSEL',
-            children: childContainerIds.join(','),
-            text: postText,
-          },
-          responsePayload: {
-            id: carouselContainerId,
-            container_status: 'FINISHED',
-          },
-          durationMs: 124,
+        // Parent carousel container
+        const parentParams = new URLSearchParams({
+          media_type: 'CAROUSEL',
+          children: childContainerIds.join(','),
+          text: postText,
+          access_token: threadsToken,
         });
-
-        // Step 2: Publish CAROUSEL container
-        const publishedCarouselId = `1804920999888`;
-        traces.push({
-          step: stepCounter++,
-          platform: 'threads',
-          actionType: 'carousel',
-          endpoint: publishEndpoint,
-          method: 'POST',
-          status: threadsToken && !dryRun ? 'success' : 'dry_run_verified',
-          httpStatus: 200,
-          requestPayload: {
-            creation_id: carouselContainerId,
-          },
-          responsePayload: {
-            id: publishedCarouselId,
-            permalink: `https://www.threads.net/@bridgerelay/post/${publishedCarouselId}`,
-          },
-          durationMs: 98,
-        });
+        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
+        const parentData = await parentRes.json();
+        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
+        containerIdToPublish = parentData.id;
       } else {
-        // TEXT, LINK, IMAGE, or VIDEO post on Threads
-        const mediaType =
-          actionType === 'image'
-            ? 'IMAGE'
-            : actionType === 'video'
-              ? 'VIDEO'
-              : 'TEXT';
+        // Text, link, or single image/video
+        const isImage = actionType === 'image' && mediaUrls.length > 0;
+        const isVideo = actionType === 'video' && mediaUrls.length > 0;
+        const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
 
-        const containerReq: Record<string, unknown> = {
+        const params = new URLSearchParams({
           media_type: mediaType,
           text: postText,
+          access_token: threadsToken,
           ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
-          ...(actionType === 'image'
-            ? {
-                image_url:
-                  mediaUrls[0] || 'https://rss-bridge.org/static/release-2026-10-arch.png',
-              }
-            : {}),
-          ...(actionType === 'video'
-            ? {
-                video_url:
-                  mediaUrls[0] || 'https://rss-bridge.org/static/demo-clip.mp4',
-              }
-            : {}),
-        };
+          ...(isImage ? { image_url: mediaUrls[0] } : {}),
+          ...(isVideo ? { video_url: mediaUrls[0] } : {}),
+        });
 
-        const simulatedContainerId = `17982340912830`;
-        const simulatedPublishedId = `18049201948200`;
+        const t0 = Date.now();
+        const createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
+        const createData = await createRes.json();
+        if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
+        containerIdToPublish = createData.id;
 
         traces.push({
           step: stepCounter++,
@@ -551,42 +1200,59 @@ export async function POST(req: NextRequest) {
           actionType,
           endpoint: containerEndpoint,
           method: 'POST',
-          status: threadsToken && !dryRun ? 'success' : 'dry_run_verified',
-          httpStatus: 200,
-          requestPayload: containerReq,
-          responsePayload: {
-            id: simulatedContainerId,
-            container_status: 'FINISHED',
-          },
-          durationMs: 118,
-        });
-
-        traces.push({
-          step: stepCounter++,
-          platform: 'threads',
-          actionType,
-          endpoint: publishEndpoint,
-          method: 'POST',
-          status: threadsToken && !dryRun ? 'success' : 'dry_run_verified',
-          httpStatus: 200,
-          requestPayload: {
-            creation_id: simulatedContainerId,
-          },
-          responsePayload: {
-            id: simulatedPublishedId,
-            permalink: `https://www.threads.net/@bridgerelay/post/${simulatedPublishedId}`,
-          },
-          durationMs: 94,
+          status: 'success',
+          httpStatus: createRes.status,
+          requestPayload: { mediaType, textLength: postText.length },
+          responsePayload: createData,
+          durationMs: Date.now() - t0,
         });
       }
+
+      // Check container processing readiness
+      await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+
+      // Publish container
+      const tPublish = Date.now();
+      const pubParams = new URLSearchParams({
+        creation_id: containerIdToPublish,
+        access_token: threadsToken,
+      });
+      const pubRes = await fetch(`${publishEndpoint}?${pubParams.toString()}`, { method: 'POST' });
+      const pubData = await pubRes.json();
+      if (!pubRes.ok) throw new Error(`Threads publish failed: ${JSON.stringify(pubData)}`);
+      publishedThreadsId = pubData.id;
+
+      traces.push({
+        step: stepCounter++,
+        platform: 'threads',
+        actionType,
+        endpoint: publishEndpoint,
+        method: 'POST',
+        status: 'success',
+        httpStatus: pubRes.status,
+        requestPayload: { creation_id: containerIdToPublish },
+        responsePayload: pubData,
+        durationMs: Date.now() - tPublish,
+      });
+    }
+
+    // Persist to server deduplication database
+    if (itemGuid) {
+      markItemSeen({
+        guidHash: computeDeterministicHash(itemGuid),
+        guid: itemGuid,
+        feedId,
+        title: itemTitle,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+        mastodonStatusId: publishedMastodonId,
+        threadsPostId: publishedThreadsId,
+      });
     }
 
     return NextResponse.json({
+      success: true,
       executedAt: new Date().toISOString(),
-      liveCredentialsConfigured: {
-        mastodon: Boolean(mastodonToken),
-        threads: Boolean(threadsToken && threadsUserId),
-      },
       traces,
     });
   } catch (error) {
@@ -596,77 +1262,41 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
 ```
 
-# app\api\pipeline\verify\route.ts
+# .ai_backups\20261027_014212_app_api_pipeline_verify_route.ts
 
 ```ts
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      platform,
-      mastodonInstanceUrl,
-      mastodonAccessToken,
-      threadsUserId,
-      threadsAccessToken,
-    } = body as {
-      platform: 'mastodon' | 'threads';
-      mastodonInstanceUrl?: string;
-      mastodonAccessToken?: string;
-      threadsUserId?: string;
-      threadsAccessToken?: string;
-    };
+    const { platform, mastodonInstanceUrl, mastodonAccessToken, threadsUserId, threadsAccessToken } = body;
 
     if (platform === 'mastodon') {
-      const instance = (
-        mastodonInstanceUrl ||
-        process.env.MASTODON_INSTANCE_URL ||
-        'https://mastodon.social'
-      ).replace(/\/$/, '');
+      const instance = (mastodonInstanceUrl || process.env.MASTODON_INSTANCE_URL || 'https://mastodon.social').replace(/\/$/, '');
       const token = (mastodonAccessToken || process.env.MASTODON_ACCESS_TOKEN || '').trim();
 
       if (!token) {
-        return NextResponse.json(
-          {
-            verified: false,
-            mode: 'missing_token',
-            message: 'Enter a Mastodon Access Token in the dashboard variable field first.',
-          },
-          { status: 400 }
-        );
+        return NextResponse.json({ verified: false, message: 'Missing Mastodon token' }, { status: 400 });
       }
 
-      try {
-        const res = await fetch(`${instance}/api/v1/accounts/verify_credentials`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (res.ok) {
-          const account = await res.json();
-          return NextResponse.json({
-            verified: true,
-            mode: 'live',
-            handle: `@${account.username}@${new URL(instance).hostname}`,
-            displayName: account.display_name || account.username,
-            message: `Connected to live Mastodon account @${account.username}`,
-          });
-        }
-      } catch {
-        // Fallback if sandbox blocks outbound or token is a test token
-      }
-
-      return NextResponse.json({
-        verified: true,
-        mode: 'configured',
-        handle: `@user@${new URL(instance).hostname}`,
-        displayName: 'Configured Mastodon Account',
-        message: `Saved Mastodon credentials for ${instance}`,
+      const res = await fetch(`${instance}/api/v1/accounts/verify_credentials`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
+
+      if (res.ok) {
+        const account = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${account.username}@${new URL(instance).hostname}`,
+          displayName: account.display_name || account.username,
+        });
+      }
+      return NextResponse.json({ verified: false, message: 'Invalid Mastodon credentials' }, { status: 401 });
     }
 
     if (platform === 'threads') {
@@ -674,52 +1304,3587 @@ export async function POST(req: NextRequest) {
       const token = (threadsAccessToken || process.env.THREADS_ACCESS_TOKEN || '').trim();
 
       if (!userId || !token) {
-        return NextResponse.json(
-          {
-            verified: false,
-            mode: 'missing_token',
-            message: 'Enter both Threads User ID and Threads Access Token in the dashboard.',
-          },
-          { status: 400 }
-        );
+        return NextResponse.json({ verified: false, message: 'Missing Threads User ID or Token' }, { status: 400 });
       }
 
-      try {
-        const params = new URLSearchParams({
-          fields: 'id,username,threads_profile_picture_url',
-          access_token: token,
+      const res = await fetch(`https://graph.threads.net/v1.0/${userId}?fields=id,username&access_token=${token}`);
+      if (res.ok) {
+        const profile = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${profile.username || userId}`,
         });
-        const res = await fetch(`https://graph.threads.net/v1.0/${userId}?${params.toString()}`);
-        if (res.ok) {
-          const profile = await res.json();
-          return NextResponse.json({
-            verified: true,
-            mode: 'live',
-            handle: `@${profile.username || userId}`,
-            message: `Connected to live Meta Threads profile @${profile.username || userId}`,
-          });
-        }
-      } catch {
-        // Fallback if sandbox blocks outbound or test credentials are used
       }
-
-      return NextResponse.json({
-        verified: true,
-        mode: 'configured',
-        handle: `@threads_${userId.slice(0, 8)}`,
-        message: `Saved Meta Threads container credentials for User ID ${userId}`,
-      });
+      return NextResponse.json({ verified: false, message: 'Invalid Threads credentials' }, { status: 401 });
     }
 
     return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
   } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Verification failed' }, { status: 500 });
+  }
+}
+```
+
+# .ai_backups\20261027_014212_components_BridgeRelayStudio.tsx
+
+```tsx
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  Plus,
+  Rss,
+  Send,
+  Trash2,
+} from 'lucide-react';
+import {
+  BridgeFeedSource,
+  DashboardEnvVar,
+  FilterRulesConfig,
+  FormattingConfig,
+  getEnvValue,
+  INITIAL_BRIDGE_FEEDS,
+  INITIAL_DASHBOARD_ENV_VARS,
+  INITIAL_NORMALIZED_ITEMS,
+  INITIAL_SEEN_STATE,
+  InitialRunPolicy,
+  NormalizedFeedItem,
+  renderFormattedPreview,
+  resolveEnvVariablesInString,
+  SeenEntry,
+  SocialActionType,
+} from '@/lib/pipeline-engine';
+import type { PublishStepTrace } from '@/app/api/pipeline/publish/route';
+
+export type IftttViewMode =
+  | 'edit_trigger'
+  | 'choose_action'
+  | 'edit_action'
+  | 'applet_home'
+  | 'connections';
+
+interface ActionCardDefinition {
+  id: SocialActionType;
+  title: string;
+  threadsDescription: string;
+  mastodonDescription: string;
+  defaultTemplate: string;
+}
+
+const ACTION_CARDS: ActionCardDefinition[] = [
+  {
+    id: 'text',
+    title: 'Create a text post',
+    threadsDescription: 'This action will create a text post on Threads.',
+    mastodonDescription: 'This action will create a text post on Mastodon.',
+    defaultTemplate: '{title}\n\n{summary}\n\n{tags}',
+  },
+  {
+    id: 'link',
+    title: 'Create a link post',
+    threadsDescription: 'This action will create a link post on Threads.',
+    mastodonDescription: 'This action will create a link post on Mastodon.',
+    defaultTemplate: '{title}\n\n{summary}\n\n{link}{UTM_SUFFIX}',
+  },
+  {
+    id: 'image',
+    title: 'Create an image post',
+    threadsDescription: 'This action will create an image post on Threads.',
+    mastodonDescription: 'This action will create an image post on Mastodon.',
+    defaultTemplate: '{title}\n\n{link}\n{tags}',
+  },
+  {
+    id: 'video',
+    title: 'Create a video post',
+    threadsDescription: 'This action will create a video post on Threads.',
+    mastodonDescription: 'This action will create a video post on Mastodon.',
+    defaultTemplate: '{title} — Watch via {source}\n\n{link}\n{tags}',
+  },
+  {
+    id: 'carousel',
+    title: 'Create a carousel (multiple media) post',
+    threadsDescription:
+      'This action will create a carousel (multiple media) post on Threads. At least two items are required in the carousel.',
+    mastodonDescription:
+      'This action will create a multi-image carousel post on Mastodon (up to 4 media attachments).',
+    defaultTemplate: '{title}\n\n{summary}\n\n{link}\n{tags}',
+  },
+];
+
+const QUICK_BRIDGE_EXAMPLES = [
+  {
+    label: 'TikTok Bridge (By user)',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom',
+  },
+  {
+    label: 'GitHub Releases Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=GithubReleaseBridge&user=RSS-Bridge&repo=rss-bridge&format=Json',
+  },
+  {
+    label: 'Instagram User Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=InstagramBridge&context=Username&u=natgeo&media_type=all&format=Atom',
+  },
+  {
+    label: 'YouTube Channel Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=YoutubeBridge&context=By+username&u=fireship&format=Mrss',
+  },
+  {
+    label: 'Hacker News Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=HackerNewsBridge&area=newest&min_score=150&format=Atom',
+  },
+];
+
+const STORAGE_KEY_ENV = 'bridgerelay_ifttt_env_v3';
+const STORAGE_KEY_TRIGGER_URL = 'bridgerelay_ifttt_trigger_url_v3';
+
+export default function BridgeRelayStudio() {
+  const [viewMode, setViewMode] = useState<IftttViewMode>('choose_action');
+  const [activeServiceTab, setActiveServiceTab] = useState<'threads' | 'mastodon' | 'both'>('threads');
+
+  const [triggerFeedUrl, setTriggerFeedUrl] = useState<string>(
+    'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom'
+  );
+  const [showUrlHelper, setShowUrlHelper] = useState<boolean>(false);
+  const [initialRunPolicy, setInitialRunPolicy] = useState<InitialRunPolicy>('seed_only');
+  const [pollIntervalMinutes, setPollIntervalMinutes] = useState<number>(15);
+
+  const [selectedActionType, setSelectedActionType] = useState<SocialActionType>('image');
+  const [actionLinkUrl, setActionLinkUrl] = useState<string>('{link}');
+  const [actionMediaUrl, setActionMediaUrl] = useState<string>(
+    'https://rss-bridge.org/static/release-2026-10-arch.png'
+  );
+  const [actionCarouselUrls, setActionCarouselUrls] = useState<string>(
+    'https://rss-bridge.org/static/slide-1.jpg, https://rss-bridge.org/static/slide-2.jpg'
+  );
+
+  const [envVars, setEnvVars] = useState<DashboardEnvVar[]>(INITIAL_DASHBOARD_ENV_VARS);
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+  const [newVarKey, setNewVarKey] = useState<string>('');
+  const [newVarValue, setNewVarValue] = useState<string>('');
+  const [statusBanner, setStatusBanner] = useState<string>('');
+
+  const [items, setItems] = useState<NormalizedFeedItem[]>(INITIAL_NORMALIZED_ITEMS);
+  const [selectedItemGuid, setSelectedItemGuid] = useState<string>(INITIAL_NORMALIZED_ITEMS[0].guid);
+  const [seenLedger, setSeenLedger] = useState<SeenEntry[]>(INITIAL_SEEN_STATE);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+
+  const [formatting, setFormatting] = useState<FormattingConfig>({
+    template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+    mastodonMaxChars: 500,
+    threadsMaxChars: 500,
+    mastodonCountUrlAs23Chars: true,
+    truncationStrategy: 'ellipsis',
+    includeMediaAttachment: true,
+    defaultHashtags: ['RSSBridge'],
+    mastodonVisibility: 'public',
+  });
+
+  const [publishTraces, setPublishTraces] = useState<PublishStepTrace[]>([]);
+
+  useEffect(() => {
+    try {
+      const savedEnv = localStorage.getItem(STORAGE_KEY_ENV);
+      if (savedEnv) {
+        const parsed = JSON.parse(savedEnv);
+        if (Array.isArray(parsed) && parsed.length > 0) setEnvVars(parsed);
+      }
+      const savedUrl = localStorage.getItem(STORAGE_KEY_TRIGGER_URL);
+      if (savedUrl) setTriggerFeedUrl(savedUrl);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const updateAndSaveEnvVars = (updater: (prev: DashboardEnvVar[]) => DashboardEnvVar[]) => {
+    setEnvVars((prev) => {
+      const next = updater(prev);
+      try {
+        localStorage.setItem(STORAGE_KEY_ENV, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    setStatusBanner('Saved credentials in dashboard');
+    setTimeout(() => setStatusBanner(''), 2500);
+  };
+
+  const selectedItem = useMemo(() => {
+    return items.find((i) => i.guid === selectedItemGuid) || items[0];
+  }, [items, selectedItemGuid]);
+
+  const mastodonPreview = useMemo(() => {
+    if (!selectedItem) return null;
+    return renderFormattedPreview(selectedItem, formatting, 'mastodon', envVars);
+  }, [selectedItem, formatting, envVars]);
+
+  const threadsPreview = useMemo(() => {
+    if (!selectedItem) return null;
+    return renderFormattedPreview(selectedItem, formatting, 'threads', envVars);
+  }, [selectedItem, formatting, envVars]);
+
+  const currentActionDefinition = useMemo(() => {
+    return ACTION_CARDS.find((c) => c.id === selectedActionType) || ACTION_CARDS[0];
+  }, [selectedActionType]);
+
+  const handleUpdateTrigger = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      localStorage.setItem(STORAGE_KEY_TRIGGER_URL, triggerFeedUrl);
+    } catch {
+      // ignore
+    }
+
+    setIsPolling(true);
+    const resolvedUrl = resolveEnvVariablesInString(triggerFeedUrl, envVars);
+    setStatusBanner(`Updating trigger & polling ${resolvedUrl}...`);
+
+    try {
+      const res = await fetch('/api/pipeline/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: 'ifttt-active-trigger',
+          feedName: 'RSS-Bridge Trigger',
+          bridgeUrl: resolvedUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        const incoming: NormalizedFeedItem[] = data.items;
+        setItems((prev) => {
+          const existing = new Set(prev.map((i) => i.guid));
+          const fresh = incoming.filter((i) => !existing.has(i.guid));
+          return [...fresh, ...prev];
+        });
+        setSelectedItemGuid(incoming[0].guid);
+      }
+      setStatusBanner('Trigger updated! Choose your action below.');
+      setViewMode('choose_action');
+    } catch {
+      setStatusBanner('Trigger URL saved.');
+      setViewMode('choose_action');
+    } finally {
+      setIsPolling(false);
+    }
+  };
+
+  const handleRunAppletNow = async () => {
+    if (!selectedItem || !mastodonPreview || !threadsPreview) return;
+    setIsPublishing(true);
+
+    const platforms: ('mastodon' | 'threads')[] =
+      activeServiceTab === 'both'
+        ? ['threads', 'mastodon']
+        : activeServiceTab === 'mastodon'
+          ? ['mastodon']
+          : ['threads'];
+
+    const mediaUrls =
+      selectedActionType === 'carousel'
+        ? actionCarouselUrls.split(',').map((s) => s.trim()).filter(Boolean)
+        : selectedItem.enclosures.length > 0
+          ? selectedItem.enclosures.map((e) => e.url)
+          : [actionMediaUrl];
+
+    try {
+      const res = await fetch('/api/pipeline/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemGuid: selectedItem.guid,
+          itemTitle: selectedItem.title,
+          feedId: selectedItem.feedId,
+          platforms,
+          actionType: selectedActionType,
+          mastodonPosts: mastodonPreview.posts,
+          threadsPosts: threadsPreview.posts,
+          linkUrl: resolveEnvVariablesInString(
+            actionLinkUrl.replace('{link}', selectedItem.link),
+            envVars
+          ),
+          mediaUrls,
+          visibility: formatting.mastodonVisibility,
+          credentials: {
+            mastodonInstanceUrl: getEnvValue(envVars, 'MASTODON_INSTANCE_URL', 'https://mastodon.social'),
+            mastodonAccessToken: getEnvValue(envVars, 'MASTODON_ACCESS_TOKEN', ''),
+            threadsUserId: getEnvValue(envVars, 'THREADS_USER_ID', ''),
+            threadsAccessToken: getEnvValue(envVars, 'THREADS_ACCESS_TOKEN', ''),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.traces && Array.isArray(data.traces)) {
+        setPublishTraces(data.traces);
+        setSeenLedger((prev) => [
+          {
+            guid: selectedItem.guid,
+            hashId: selectedItem.hashId,
+            feedId: selectedItem.feedId,
+            title: selectedItem.title,
+            status: platforms.length === 2 ? 'published_both' : platforms[0] === 'mastodon' ? 'published_mastodon' : 'published_threads',
+            reason: `Published via "${currentActionDefinition.title}" (${data.traces.length} API steps)`,
+            processedAt: new Date().toISOString(),
+          },
+          ...prev.filter((s) => s.guid !== selectedItem.guid),
+        ]);
+        setStatusBanner(`Published to ${platforms.join(' & ')}!`);
+        setViewMode('applet_home');
+      } else if (data.error) {
+        setStatusBanner(`Error: ${data.error}`);
+      }
+    } catch (err) {
+      setStatusBanner(err instanceof Error ? err.message : 'Publish failed');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white text-[#191919]">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 lg:px-10 py-4 bg-white border-b border-slate-200">
+        <a
+          href="#top"
+          onClick={(e) => {
+            e.preventDefault();
+            setViewMode('applet_home');
+          }}
+          className="text-xl font-extrabold tracking-tight text-[#191919]"
+        >
+          BridgeRelay
+        </a>
+
+        <nav className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600">
+          <button
+            type="button"
+            onClick={() => setViewMode('edit_trigger')}
+            className={`py-1 border-b-2 ${viewMode === 'edit_trigger' ? 'border-[#EA7600] text-[#EA7600]' : 'border-transparent hover:text-black'}`}
+          >
+            Edit Trigger (RSS)
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('choose_action')}
+            className={`py-1 border-b-2 ${viewMode === 'choose_action' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Threads & Mastodon Actions
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('edit_action')}
+            className={`py-1 border-b-2 ${viewMode === 'edit_action' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Configure Post Ingredients
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('applet_home')}
+            className={`py-1 border-b-2 ${viewMode === 'applet_home' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Applet
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('connections')}
+            className={`py-1 border-b-2 ${viewMode === 'connections' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Dashboard Variables ({envVars.length})
+          </button>
+        </nav>
+
+        <button
+          type="button"
+          onClick={handleRunAppletNow}
+          disabled={isPublishing}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-extrabold text-white bg-[#191919] rounded-full hover:bg-neutral-800 disabled:opacity-60"
+        >
+          <Send className="w-3.5 h-3.5" />
+          <span>{isPublishing ? 'Publishing...' : 'Run Applet Now'}</span>
+        </button>
+      </header>
+
+      {statusBanner && (
+        <div className="bg-emerald-800 text-white text-xs font-semibold text-center py-2 px-4">
+          {statusBanner}
+        </div>
+      )}
+
+      {/* VIEW: TRIGGER */}
+      {viewMode === 'edit_trigger' && (
+        <div className="flex-1 bg-[#E56B00] text-white flex flex-col items-center justify-center px-6 py-14">
+          <div className="w-full max-w-xl mx-auto flex flex-col items-center">
+            <div className="w-full flex items-center justify-between mb-4">
+              <button
+                type="button"
+                onClick={() => setViewMode('applet_home')}
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-white/90 hover:text-white"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back</span>
+              </button>
+            </div>
+
+            <h1 className="text-4xl font-extrabold text-center mb-6">Edit trigger</h1>
+            <Rss className="w-24 h-24 text-white mb-6" />
+
+            <form onSubmit={handleUpdateTrigger} className="w-full space-y-6">
+              <div>
+                <label className="block text-base font-extrabold text-white mb-2">Feed URL</label>
+                <textarea
+                  rows={4}
+                  required
+                  value={triggerFeedUrl}
+                  onChange={(e) => setTriggerFeedUrl(e.target.value)}
+                  className="w-full bg-white text-[#191919] rounded-2xl p-4 text-base focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUrlHelper((v) => !v)}
+                  className="mt-2 text-xs font-bold underline"
+                >
+                  {showUrlHelper ? 'Hide Presets' : 'Choose from Bridge Presets'}
+                </button>
+              </div>
+
+              {showUrlHelper && (
+                <div className="bg-black/20 rounded-2xl p-4 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {QUICK_BRIDGE_EXAMPLES.map((ex) => (
+                      <button
+                        key={ex.label}
+                        type="button"
+                        onClick={() => setTriggerFeedUrl(ex.url)}
+                        className="px-3 py-1.5 text-xs font-bold bg-white text-black rounded-lg"
+                      >
+                        {ex.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-center">
+                <button
+                  type="submit"
+                  disabled={isPolling}
+                  className="bg-white text-[#191919] font-extrabold text-xl px-12 py-4 rounded-full"
+                >
+                  {isPolling ? 'Checking Feed...' : 'Update trigger'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: CHOOSE ACTION */}
+      {viewMode === 'choose_action' && (
+        <div className="flex-1 flex flex-col bg-white">
+          <div className="bg-[#191919] text-white pt-10 pb-12 px-6 flex flex-col items-center">
+            <div className="flex items-center gap-2 bg-white/10 p-1 rounded-full mb-8">
+              {(['threads', 'mastodon', 'both'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveServiceTab(tab)}
+                  className={`px-4 py-1.5 text-xs font-bold rounded-full capitalize ${activeServiceTab === tab ? 'bg-white text-black' : 'text-white/80'}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-3 text-3xl font-extrabold border-4 border-white">
+              {activeServiceTab === 'mastodon' ? 'M' : '@'}
+            </div>
+            <h1 className="text-3xl font-extrabold capitalize">{activeServiceTab} Actions</h1>
+          </div>
+
+          <div className="max-w-5xl w-full mx-auto px-6 py-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ACTION_CARDS.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedActionType(card.id);
+                    setFormatting((prev) => ({ ...prev, template: card.defaultTemplate }));
+                    setViewMode('edit_action');
+                  }}
+                  className={`bg-[#191919] text-white rounded-2xl p-6 flex flex-col justify-between text-left min-h-[180px] hover:bg-neutral-900 ${selectedActionType === card.id ? 'ring-4 ring-[#EA7600]' : ''}`}
+                >
+                  <div>
+                    <h2 className="text-xl font-extrabold text-white mb-2">{card.title}</h2>
+                    <p className="text-xs text-white/80">
+                      {activeServiceTab === 'mastodon' ? card.mastodonDescription : card.threadsDescription}
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-white/50 pt-4">Click to configure</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: EDIT ACTION */}
+      {viewMode === 'edit_action' && (
+        <div className="flex-1 bg-[#191919] text-white flex flex-col items-center px-6 py-10">
+          <div className="w-full max-w-2xl mx-auto space-y-6">
+            <button
+              type="button"
+              onClick={() => setViewMode('choose_action')}
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-white/80"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to actions</span>
+            </button>
+
+            <h1 className="text-3xl font-extrabold text-center">{currentActionDefinition.title}</h1>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold mb-2">Post Template</label>
+                <textarea
+                  rows={4}
+                  value={formatting.template}
+                  onChange={(e) => setFormatting((prev) => ({ ...prev, template: e.target.value }))}
+                  className="w-full bg-white text-black rounded-xl p-3 text-sm focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {['{title}', '{summary}', '{link}', '{author}', '{tags}'].map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      onClick={() => setFormatting((prev) => ({ ...prev, template: `${prev.template} ${tok}` }))}
+                      className="px-2 py-1 text-xs font-bold bg-white text-black rounded"
+                    >
+                      + {tok}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {selectedActionType === 'image' && (
+                <div>
+                  <label className="block text-sm font-bold mb-1">Fallback Image URL</label>
+                  <input
+                    type="text"
+                    value={actionMediaUrl}
+                    onChange={(e) => setActionMediaUrl(e.target.value)}
+                    className="w-full bg-white text-black rounded-lg p-2.5 text-xs font-mono"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => setViewMode('applet_home')}
+                className="bg-white text-black font-extrabold text-lg px-10 py-3 rounded-full"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: APPLET HOME */}
+      {viewMode === 'applet_home' && (
+        <div className="flex-1 max-w-3xl w-full mx-auto px-6 py-10 space-y-8">
+          <h1 className="text-3xl font-extrabold text-center">Your Active Applet</h1>
+
+          <div className="space-y-4">
+            <div className="bg-[#E56B00] text-white rounded-2xl p-6 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-white/70">If This</div>
+                <div className="text-xl font-extrabold">New feed item (RSS)</div>
+                <div className="text-xs font-mono truncate max-w-md mt-1">{triggerFeedUrl}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('edit_trigger')}
+                className="px-4 py-2 bg-white text-black text-xs font-bold rounded-full"
+              >
+                Edit
+              </button>
+            </div>
+
+            <div className="bg-[#191919] text-white rounded-2xl p-6 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-white/70">Then That</div>
+                <div className="text-xl font-extrabold">{currentActionDefinition.title}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('choose_action')}
+                className="px-4 py-2 bg-white text-black text-xs font-bold rounded-full"
+              >
+                Change
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={handleRunAppletNow}
+              disabled={isPublishing}
+              className="bg-[#191919] text-white font-extrabold text-lg px-10 py-4 rounded-full"
+            >
+              {isPublishing ? 'Publishing...' : 'Run Applet Now'}
+            </button>
+          </div>
+
+          {publishTraces.length > 0 && (
+            <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-slate-50">
+              <h3 className="text-xs font-extrabold">Last Execution Log ({publishTraces.length} API Calls)</h3>
+              {publishTraces.map((t) => (
+                <div key={t.step} className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs flex justify-between">
+                  <span className="font-mono">{t.platform}: {t.endpoint}</span>
+                  <span className="font-bold text-emerald-700">HTTP {t.httpStatus}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: CONNECTIONS & ENV */}
+      {viewMode === 'connections' && (
+        <div className="flex-1 max-w-4xl w-full mx-auto px-6 py-10 space-y-6">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-extrabold">Credentials & Variables</h1>
+            <button
+              type="button"
+              onClick={() => setViewMode('applet_home')}
+              className="px-4 py-2 bg-black text-white text-xs font-bold rounded-full"
+            >
+              Done
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="p-3">Variable</th>
+                  <th className="p-3">Value</th>
+                  <th className="p-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {envVars.map((v) => (
+                  <tr key={v.id}>
+                    <td className="p-3 font-mono font-bold">{v.key}</td>
+                    <td className="p-3">
+                      <input
+                        type={v.isSecret && !revealedSecrets[v.id] ? 'password' : 'text'}
+                        value={v.value}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          updateAndSaveEnvVars((prev) =>
+                            prev.map((item) => (item.id === v.id ? { ...item, value: val } : item))
+                          );
+                        }}
+                        className="w-full p-1.5 border border-slate-300 rounded font-mono text-xs"
+                      />
+                    </td>
+                    <td className="p-3 text-right">
+                      {v.isSecret && (
+                        <button
+                          type="button"
+                          onClick={() => setRevealedSecrets((prev) => ({ ...prev, [v.id]: !prev[v.id] }))}
+                          className="p-1 text-slate-500"
+                        >
+                          {revealedSecrets[v.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+# .ai_backups\20261027_014212_lib_db.ts
+
+```ts
+// In lib/db.ts:
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'seen_ledger.json');
+```
+
+# .ai_backups\20261027_014212_lib_utils.ts
+
+```ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+```
+
+# .ai_backups\20261027_014212_next.config.ts
+
+```ts
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
+  },
+};
+
+export default nextConfig;
+```
+
+# .ai_backups\20261027_014213_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const { items } = await pollRes.json();
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# .ai_backups\20261027_014213_lib_utils.ts
+
+```ts
+git add .
+git commit -m "Fix Vercel 404s, add serverless storage and real publishing"
+git push
+```
+
+# .ai_backups\20261027_014213_package.json
+
+```json
+{
+  "name": "bridgerelay",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "next": "^15.4.9",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.3"
+  }
+}
+```
+
+# .ai_backups\20261027_014214_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+  NormalizedFeedItem,
+  MediaEnclosure,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const data = (await pollRes.json()) as { items?: NormalizedFeedItem[] };
+      const items: NormalizedFeedItem[] = data.items || [];
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e: MediaEnclosure) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# .ai_backups\20261027_023525_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { XMLParser } from 'fast-xml-parser';
+import {
+  cleanHtmlToPlainText,
+  computeDeterministicHash,
+  extractImagesFromHtml,
+  MediaEnclosure,
+  NormalizedFeedItem,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  trimValues: true,
+  cdataPropName: '__cdata',
+});
+
+function getText(node: unknown): string {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if (obj.__cdata) return String(obj.__cdata);
+    if (obj['#text']) return String(obj['#text']);
+  }
+  return String(node);
+}
+
+export function parseXmlFeed(xmlText: string, feedId: string, feedName: string): NormalizedFeedItem[] {
+  const items: NormalizedFeedItem[] = [];
+  const parsed = xmlParser.parse(xmlText);
+
+  // 1. RSS 2.0 / MRSS channel items
+  let rawList = parsed?.rss?.channel?.item;
+  // 2. Atom feed entries
+  if (!rawList) {
+    rawList = parsed?.feed?.entry;
+  }
+
+  if (!rawList) return [];
+  const entries = Array.isArray(rawList) ? rawList : [rawList];
+
+  for (const entry of entries.slice(0, 20)) {
+    const rawTitle = getText(entry.title) || 'Untitled Feed Entry';
+    const title = cleanHtmlToPlainText(rawTitle, false);
+
+    let link = '';
+    if (typeof entry.link === 'string') {
+      link = entry.link;
+    } else if (entry.link?.['@_href']) {
+      link = entry.link['@_href'];
+    } else if (Array.isArray(entry.link)) {
+      const alt = entry.link.find((l: Record<string, string>) => l['@_rel'] === 'alternate');
+      link = alt?.['@_href'] || entry.link[0]?.['@_href'] || getText(entry.link[0]);
+    }
+
+    const rawGuid = getText(entry.guid) || getText(entry.id) || link || `${feedId}-${title}`;
+    const rawHtml =
+      getText(entry['content:encoded']) ||
+      getText(entry.content) ||
+      getText(entry.description) ||
+      getText(entry.summary) ||
+      '';
+
+    const author =
+      cleanHtmlToPlainText(
+        getText(entry.author?.name) || getText(entry.author) || getText(entry['dc:creator']),
+        false
+      ) || 'bridge-author';
+
+    const pubDate =
+      getText(entry.pubDate) ||
+      getText(entry.published) ||
+      getText(entry.updated) ||
+      new Date().toISOString();
+
+    const tags: string[] = [];
+    const rawCats = entry.category;
+    if (rawCats) {
+      const catList = Array.isArray(rawCats) ? rawCats : [rawCats];
+      for (const cat of catList) {
+        const val = typeof cat === 'string' ? cat : cat['@_term'] || getText(cat);
+        if (val && tags.length < 6) tags.push(val);
+      }
+    }
+
+    const enclosures: MediaEnclosure[] = [];
+    const rawEnc = entry.enclosure;
+    if (rawEnc) {
+      const encList = Array.isArray(rawEnc) ? rawEnc : [rawEnc];
+      for (const enc of encList) {
+        if (enc?.['@_url']) {
+          enclosures.push({
+            url: enc['@_url'],
+            mimeType: enc['@_type'] || 'image/jpeg',
+            source: 'enclosure',
+          });
+        }
+      }
+    }
+
+    for (const img of extractImagesFromHtml(rawHtml)) {
+      if (!enclosures.some((e) => e.url === img.url)) {
+        enclosures.push(img);
+      }
+    }
+
+    items.push({
+      guid: rawGuid,
+      hashId: computeDeterministicHash(rawGuid),
+      feedId,
+      feedName,
+      title,
+      rawHtml,
+      cleanSummary: cleanHtmlToPlainText(rawHtml, true),
+      link: link || 'https://rss-bridge.org',
+      author,
+      publishedAt: Number.isNaN(Date.parse(pubDate))
+        ? new Date().toISOString()
+        : new Date(pubDate).toISOString(),
+      tags: tags.length > 0 ? tags : ['Syndicated'],
+      enclosures,
+    });
+  }
+
+  return items;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { feedId, feedName, bridgeUrl } = body as {
+      feedId: string;
+      feedName: string;
+      bridgeUrl: string;
+    };
+
+    if (!bridgeUrl) {
+      return NextResponse.json({ error: 'bridgeUrl is required' }, { status: 400 });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const res = await fetch(bridgeUrl, {
+      headers: {
+        'User-Agent': 'BridgeRelay-Pipeline/2.0 (+https://rss-bridge.org)',
+        Accept: 'application/json, application/atom+xml, application/rss+xml, text/xml, */*',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: `Upstream bridge returned HTTP ${res.status}: ${res.statusText}` },
+        { status: 502 }
+      );
+    }
+
+    const text = await res.text();
+
+    if (text.trim().startsWith('{')) {
+      const parsed = JSON.parse(text);
+      const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+      const normalized: NormalizedFeedItem[] = rawItems.slice(0, 20).map((entry: Record<string, unknown>, idx: number) => {
+        const guid = String(entry.id || entry.url || `${feedId}-${idx}`);
+        const rawHtml = String(entry.content_html || entry.content_text || entry.summary || '');
+        const enclosures: MediaEnclosure[] = [];
+
+        if (Array.isArray(entry.attachments)) {
+          for (const att of entry.attachments) {
+            if (att && typeof att === 'object' && 'url' in att) {
+              enclosures.push({
+                url: String((att as { url: string }).url),
+                mimeType: String((att as { mime_type?: string }).mime_type || 'image/jpeg'),
+                source: 'enclosure',
+              });
+            }
+          }
+        }
+        for (const img of extractImagesFromHtml(rawHtml)) {
+          if (!enclosures.some((e) => e.url === img.url)) enclosures.push(img);
+        }
+
+        const authorObj = entry.author as { name?: string } | undefined;
+        return {
+          guid,
+          hashId: computeDeterministicHash(guid),
+          feedId,
+          feedName,
+          title: cleanHtmlToPlainText(String(entry.title || 'Untitled Entry'), false),
+          rawHtml,
+          cleanSummary: cleanHtmlToPlainText(rawHtml, true),
+          link: String(entry.url || bridgeUrl),
+          author: authorObj?.name || 'bridge-author',
+          publishedAt: String(entry.date_modified || entry.date_published || new Date().toISOString()),
+          tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
+          enclosures,
+        };
+      });
+
+      return NextResponse.json({
+        source: 'live_bridge',
+        items: normalized,
+        polledAt: new Date().toISOString(),
+      });
+    }
+
+    const xmlItems = parseXmlFeed(text, feedId, feedName);
+    return NextResponse.json({
+      source: 'live_bridge',
+      items: xmlItems,
+      polledAt: new Date().toISOString(),
+    });
+  } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Verification failed' },
+      { error: error instanceof Error ? error.message : 'Failed to poll feed' },
       { status: 500 }
     );
   }
 }
+```
 
+# .ai_backups\20261027_023525_app_api_pipeline_publish_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { markItemSeen } from '@/lib/db';
+import { computeDeterministicHash } from '@/lib/pipeline-engine';
+
+export interface PublishStepTrace {
+  step: number;
+  platform: 'mastodon' | 'threads';
+  actionType?: string;
+  endpoint: string;
+  method: 'POST' | 'GET';
+  status: 'success' | 'error';
+  httpStatus: number;
+  requestPayload: Record<string, unknown>;
+  responsePayload: Record<string, unknown>;
+  durationMs: number;
+}
+
+// Download remote image buffer and upload as multipart/form-data to Mastodon
+async function uploadMediaToMastodon(
+  mediaUrl: string,
+  mastodonInstance: string,
+  token: string
+): Promise<string> {
+  const mediaRes = await fetch(mediaUrl);
+  if (!mediaRes.ok) throw new Error(`Failed to fetch media from enclosure: ${mediaUrl}`);
+  const blob = await mediaRes.blob();
+
+  const formData = new FormData();
+  formData.append('file', blob, 'attachment.jpg');
+  formData.append('description', 'Syndicated via BridgeRelay');
+
+  const uploadRes = await fetch(`${mastodonInstance}/api/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Mastodon media upload failed (HTTP ${uploadRes.status}): ${errText}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  return uploadData.id;
+}
+
+// Poll Threads container status until FINISHED or ERROR
+async function pollThreadsContainerReady(
+  containerId: string,
+  threadsToken: string,
+  maxAttempts = 5
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const statusRes = await fetch(
+      `https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${threadsToken}`
+    );
+    if (statusRes.ok) {
+      const data = await statusRes.json();
+      if (data.status === 'FINISHED') return;
+      if (data.status === 'ERROR') {
+        throw new Error(`Threads container processing failed: ${data.error_message || 'Unknown error'}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      itemGuid,
+      itemTitle = 'Feed Item',
+      feedId = 'feed-default',
+      platforms,
+      actionType = 'text',
+      mastodonPosts,
+      threadsPosts,
+      linkUrl = '',
+      mediaUrls = [],
+      visibility = 'public',
+      credentials,
+    } = body as {
+      itemGuid?: string;
+      itemTitle?: string;
+      feedId?: string;
+      platforms: ('mastodon' | 'threads')[];
+      actionType?: 'text' | 'link' | 'image' | 'video' | 'carousel';
+      mastodonPosts: string[];
+      threadsPosts: string[];
+      linkUrl?: string;
+      mediaUrls?: string[];
+      visibility?: 'public' | 'unlisted' | 'private';
+      credentials?: {
+        mastodonInstanceUrl?: string;
+        mastodonAccessToken?: string;
+        threadsUserId?: string;
+        threadsAccessToken?: string;
+      };
+    };
+
+    const traces: PublishStepTrace[] = [];
+    let stepCounter = 1;
+
+    const mastodonInstance = (
+      credentials?.mastodonInstanceUrl ||
+      process.env.MASTODON_INSTANCE_URL ||
+      'https://mastodon.social'
+    ).replace(/\/$/, '');
+    const mastodonToken = (
+      credentials?.mastodonAccessToken ||
+      process.env.MASTODON_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    const threadsUserId = (
+      credentials?.threadsUserId ||
+      process.env.THREADS_USER_ID ||
+      ''
+    ).trim();
+    const threadsToken = (
+      credentials?.threadsAccessToken ||
+      process.env.THREADS_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    let publishedMastodonId: string | undefined;
+    let publishedThreadsId: string | undefined;
+
+    // 1. Mastodon Publishing
+    if (platforms.includes('mastodon') && mastodonPosts.length > 0) {
+      if (!mastodonToken) throw new Error('Mastodon access token is missing');
+
+      const uploadedMediaIds: string[] = [];
+      if (
+        (actionType === 'image' || actionType === 'video' || actionType === 'carousel') &&
+        mediaUrls.length > 0
+      ) {
+        const mediaToUpload = actionType === 'carousel' ? mediaUrls.slice(0, 4) : [mediaUrls[0]];
+        for (const url of mediaToUpload) {
+          const t0 = Date.now();
+          const mediaId = await uploadMediaToMastodon(url, mastodonInstance, mastodonToken);
+          uploadedMediaIds.push(mediaId);
+          traces.push({
+            step: stepCounter++,
+            platform: 'mastodon',
+            actionType,
+            endpoint: `${mastodonInstance}/api/v2/media`,
+            method: 'POST',
+            status: 'success',
+            httpStatus: 200,
+            requestPayload: { file_url: url },
+            responsePayload: { id: mediaId },
+            durationMs: Date.now() - t0,
+          });
+        }
+      }
+
+      let inReplyToId: string | undefined;
+      for (let i = 0; i < mastodonPosts.length; i++) {
+        const postText = mastodonPosts[i];
+        const statusEndpoint = `${mastodonInstance}/api/v1/statuses`;
+        const reqPayload: Record<string, unknown> = {
+          status: postText,
+          visibility,
+          ...(i === 0 && uploadedMediaIds.length > 0 ? { media_ids: uploadedMediaIds } : {}),
+          ...(inReplyToId ? { in_reply_to_id: inReplyToId } : {}),
+        };
+
+        const t0 = Date.now();
+        const res = await fetch(statusEndpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${mastodonToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(reqPayload),
+        });
+        const resData = await res.json();
+
+        if (!res.ok) {
+          throw new Error(`Mastodon status failed (HTTP ${res.status}): ${JSON.stringify(resData)}`);
+        }
+
+        inReplyToId = String(resData.id);
+        if (i === 0) publishedMastodonId = inReplyToId;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'mastodon',
+          actionType,
+          endpoint: statusEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: res.status,
+          requestPayload: reqPayload,
+          responsePayload: resData,
+          durationMs: Date.now() - t0,
+        });
+      }
+    }
+
+    // 2. Meta Threads Publishing (Real Graph API)
+    if (platforms.includes('threads') && threadsPosts.length > 0) {
+      if (!threadsUserId || !threadsToken) {
+        throw new Error('Meta Threads User ID or Access Token is missing');
+      }
+
+      const containerEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads`;
+      const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
+      const postText = threadsPosts[0];
+
+      let containerIdToPublish = '';
+
+      if (actionType === 'carousel' && mediaUrls.length >= 2) {
+        const childContainerIds: string[] = [];
+        for (const mUrl of mediaUrls.slice(0, 5)) {
+          const t0 = Date.now();
+          const isVideo = mUrl.endsWith('.mp4');
+          const childParams = new URLSearchParams({
+            is_carousel_item: 'true',
+            media_type: isVideo ? 'VIDEO' : 'IMAGE',
+            [isVideo ? 'video_url' : 'image_url']: mUrl,
+            access_token: threadsToken,
+          });
+
+          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
+          const childData = await childRes.json();
+          if (!childRes.ok) throw new Error(`Threads carousel child failed: ${JSON.stringify(childData)}`);
+          childContainerIds.push(childData.id);
+
+          traces.push({
+            step: stepCounter++,
+            platform: 'threads',
+            actionType: 'carousel_item',
+            endpoint: containerEndpoint,
+            method: 'POST',
+            status: 'success',
+            httpStatus: childRes.status,
+            requestPayload: { media_url: mUrl },
+            responsePayload: childData,
+            durationMs: Date.now() - t0,
+          });
+        }
+
+        // Parent carousel container
+        const parentParams = new URLSearchParams({
+          media_type: 'CAROUSEL',
+          children: childContainerIds.join(','),
+          text: postText,
+          access_token: threadsToken,
+        });
+        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
+        const parentData = await parentRes.json();
+        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
+        containerIdToPublish = parentData.id;
+      } else {
+        // Text, link, or single image/video
+        const isImage = actionType === 'image' && mediaUrls.length > 0;
+        const isVideo = actionType === 'video' && mediaUrls.length > 0;
+        const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
+
+        const params = new URLSearchParams({
+          media_type: mediaType,
+          text: postText,
+          access_token: threadsToken,
+          ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
+          ...(isImage ? { image_url: mediaUrls[0] } : {}),
+          ...(isVideo ? { video_url: mediaUrls[0] } : {}),
+        });
+
+        const t0 = Date.now();
+        const createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
+        const createData = await createRes.json();
+        if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
+        containerIdToPublish = createData.id;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'threads',
+          actionType,
+          endpoint: containerEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: createRes.status,
+          requestPayload: { mediaType, textLength: postText.length },
+          responsePayload: createData,
+          durationMs: Date.now() - t0,
+        });
+      }
+
+      // Check container processing readiness
+      await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+
+      // Publish container
+      const tPublish = Date.now();
+      const pubParams = new URLSearchParams({
+        creation_id: containerIdToPublish,
+        access_token: threadsToken,
+      });
+      const pubRes = await fetch(`${publishEndpoint}?${pubParams.toString()}`, { method: 'POST' });
+      const pubData = await pubRes.json();
+      if (!pubRes.ok) throw new Error(`Threads publish failed: ${JSON.stringify(pubData)}`);
+      publishedThreadsId = pubData.id;
+
+      traces.push({
+        step: stepCounter++,
+        platform: 'threads',
+        actionType,
+        endpoint: publishEndpoint,
+        method: 'POST',
+        status: 'success',
+        httpStatus: pubRes.status,
+        requestPayload: { creation_id: containerIdToPublish },
+        responsePayload: pubData,
+        durationMs: Date.now() - tPublish,
+      });
+    }
+
+    // Persist to server deduplication database
+    if (itemGuid) {
+      markItemSeen({
+        guidHash: computeDeterministicHash(itemGuid),
+        guid: itemGuid,
+        feedId,
+        title: itemTitle,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+        mastodonStatusId: publishedMastodonId,
+        threadsPostId: publishedThreadsId,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      executedAt: new Date().toISOString(),
+      traces,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Publish execution failed' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+# .ai_backups\20261027_023525_app_api_pipeline_verify_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { platform, mastodonInstanceUrl, mastodonAccessToken, threadsUserId, threadsAccessToken } = body;
+
+    if (platform === 'mastodon') {
+      const instance = (mastodonInstanceUrl || process.env.MASTODON_INSTANCE_URL || 'https://mastodon.social').replace(/\/$/, '');
+      const token = (mastodonAccessToken || process.env.MASTODON_ACCESS_TOKEN || '').trim();
+
+      if (!token) {
+        return NextResponse.json({ verified: false, message: 'Missing Mastodon token' }, { status: 400 });
+      }
+
+      const res = await fetch(`${instance}/api/v1/accounts/verify_credentials`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const account = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${account.username}@${new URL(instance).hostname}`,
+          displayName: account.display_name || account.username,
+        });
+      }
+      return NextResponse.json({ verified: false, message: 'Invalid Mastodon credentials' }, { status: 401 });
+    }
+
+    if (platform === 'threads') {
+      const userId = (threadsUserId || process.env.THREADS_USER_ID || '').trim();
+      const token = (threadsAccessToken || process.env.THREADS_ACCESS_TOKEN || '').trim();
+
+      if (!userId || !token) {
+        return NextResponse.json({ verified: false, message: 'Missing Threads User ID or Token' }, { status: 400 });
+      }
+
+      const res = await fetch(`https://graph.threads.net/v1.0/${userId}?fields=id,username&access_token=${token}`);
+      if (res.ok) {
+        const profile = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${profile.username || userId}`,
+        });
+      }
+      return NextResponse.json({ verified: false, message: 'Invalid Threads credentials' }, { status: 401 });
+    }
+
+    return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Verification failed' }, { status: 500 });
+  }
+}
+```
+
+# .ai_backups\20261027_023525_components_BridgeRelayStudio.tsx
+
+```tsx
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  Plus,
+  Rss,
+  Send,
+  Trash2,
+} from 'lucide-react';
+import {
+  BridgeFeedSource,
+  DashboardEnvVar,
+  FilterRulesConfig,
+  FormattingConfig,
+  getEnvValue,
+  INITIAL_BRIDGE_FEEDS,
+  INITIAL_DASHBOARD_ENV_VARS,
+  INITIAL_NORMALIZED_ITEMS,
+  INITIAL_SEEN_STATE,
+  InitialRunPolicy,
+  NormalizedFeedItem,
+  renderFormattedPreview,
+  resolveEnvVariablesInString,
+  SeenEntry,
+  SocialActionType,
+} from '@/lib/pipeline-engine';
+import type { PublishStepTrace } from '@/app/api/pipeline/publish/route';
+
+export type IftttViewMode =
+  | 'edit_trigger'
+  | 'choose_action'
+  | 'edit_action'
+  | 'applet_home'
+  | 'connections';
+
+interface ActionCardDefinition {
+  id: SocialActionType;
+  title: string;
+  threadsDescription: string;
+  mastodonDescription: string;
+  defaultTemplate: string;
+}
+
+const ACTION_CARDS: ActionCardDefinition[] = [
+  {
+    id: 'text',
+    title: 'Create a text post',
+    threadsDescription: 'This action will create a text post on Threads.',
+    mastodonDescription: 'This action will create a text post on Mastodon.',
+    defaultTemplate: '{title}\n\n{summary}\n\n{tags}',
+  },
+  {
+    id: 'link',
+    title: 'Create a link post',
+    threadsDescription: 'This action will create a link post on Threads.',
+    mastodonDescription: 'This action will create a link post on Mastodon.',
+    defaultTemplate: '{title}\n\n{summary}\n\n{link}{UTM_SUFFIX}',
+  },
+  {
+    id: 'image',
+    title: 'Create an image post',
+    threadsDescription: 'This action will create an image post on Threads.',
+    mastodonDescription: 'This action will create an image post on Mastodon.',
+    defaultTemplate: '{title}\n\n{link}\n{tags}',
+  },
+  {
+    id: 'video',
+    title: 'Create a video post',
+    threadsDescription: 'This action will create a video post on Threads.',
+    mastodonDescription: 'This action will create a video post on Mastodon.',
+    defaultTemplate: '{title} — Watch via {source}\n\n{link}\n{tags}',
+  },
+  {
+    id: 'carousel',
+    title: 'Create a carousel (multiple media) post',
+    threadsDescription:
+      'This action will create a carousel (multiple media) post on Threads. At least two items are required in the carousel.',
+    mastodonDescription:
+      'This action will create a multi-image carousel post on Mastodon (up to 4 media attachments).',
+    defaultTemplate: '{title}\n\n{summary}\n\n{link}\n{tags}',
+  },
+];
+
+const QUICK_BRIDGE_EXAMPLES = [
+  {
+    label: 'TikTok Bridge (By user)',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom',
+  },
+  {
+    label: 'GitHub Releases Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=GithubReleaseBridge&user=RSS-Bridge&repo=rss-bridge&format=Json',
+  },
+  {
+    label: 'Instagram User Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=InstagramBridge&context=Username&u=natgeo&media_type=all&format=Atom',
+  },
+  {
+    label: 'YouTube Channel Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=YoutubeBridge&context=By+username&u=fireship&format=Mrss',
+  },
+  {
+    label: 'Hacker News Bridge',
+    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=HackerNewsBridge&area=newest&min_score=150&format=Atom',
+  },
+];
+
+const STORAGE_KEY_ENV = 'bridgerelay_ifttt_env_v3';
+const STORAGE_KEY_TRIGGER_URL = 'bridgerelay_ifttt_trigger_url_v3';
+
+export default function BridgeRelayStudio() {
+  const [viewMode, setViewMode] = useState<IftttViewMode>('choose_action');
+  const [activeServiceTab, setActiveServiceTab] = useState<'threads' | 'mastodon' | 'both'>('threads');
+
+  const [triggerFeedUrl, setTriggerFeedUrl] = useState<string>(
+    'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom'
+  );
+  const [showUrlHelper, setShowUrlHelper] = useState<boolean>(false);
+  const [initialRunPolicy, setInitialRunPolicy] = useState<InitialRunPolicy>('seed_only');
+  const [pollIntervalMinutes, setPollIntervalMinutes] = useState<number>(15);
+
+  const [selectedActionType, setSelectedActionType] = useState<SocialActionType>('image');
+  const [actionLinkUrl, setActionLinkUrl] = useState<string>('{link}');
+  const [actionMediaUrl, setActionMediaUrl] = useState<string>(
+    'https://rss-bridge.org/static/release-2026-10-arch.png'
+  );
+  const [actionCarouselUrls, setActionCarouselUrls] = useState<string>(
+    'https://rss-bridge.org/static/slide-1.jpg, https://rss-bridge.org/static/slide-2.jpg'
+  );
+
+  const [envVars, setEnvVars] = useState<DashboardEnvVar[]>(INITIAL_DASHBOARD_ENV_VARS);
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+  const [newVarKey, setNewVarKey] = useState<string>('');
+  const [newVarValue, setNewVarValue] = useState<string>('');
+  const [statusBanner, setStatusBanner] = useState<string>('');
+
+  const [items, setItems] = useState<NormalizedFeedItem[]>(INITIAL_NORMALIZED_ITEMS);
+  const [selectedItemGuid, setSelectedItemGuid] = useState<string>(INITIAL_NORMALIZED_ITEMS[0].guid);
+  const [seenLedger, setSeenLedger] = useState<SeenEntry[]>(INITIAL_SEEN_STATE);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+
+  const [formatting, setFormatting] = useState<FormattingConfig>({
+    template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+    mastodonMaxChars: 500,
+    threadsMaxChars: 500,
+    mastodonCountUrlAs23Chars: true,
+    truncationStrategy: 'ellipsis',
+    includeMediaAttachment: true,
+    defaultHashtags: ['RSSBridge'],
+    mastodonVisibility: 'public',
+  });
+
+  const [publishTraces, setPublishTraces] = useState<PublishStepTrace[]>([]);
+
+  useEffect(() => {
+    try {
+      const savedEnv = localStorage.getItem(STORAGE_KEY_ENV);
+      if (savedEnv) {
+        const parsed = JSON.parse(savedEnv);
+        if (Array.isArray(parsed) && parsed.length > 0) setEnvVars(parsed);
+      }
+      const savedUrl = localStorage.getItem(STORAGE_KEY_TRIGGER_URL);
+      if (savedUrl) setTriggerFeedUrl(savedUrl);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const updateAndSaveEnvVars = (updater: (prev: DashboardEnvVar[]) => DashboardEnvVar[]) => {
+    setEnvVars((prev) => {
+      const next = updater(prev);
+      try {
+        localStorage.setItem(STORAGE_KEY_ENV, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    setStatusBanner('Saved credentials in dashboard');
+    setTimeout(() => setStatusBanner(''), 2500);
+  };
+
+  const selectedItem = useMemo(() => {
+    return items.find((i) => i.guid === selectedItemGuid) || items[0];
+  }, [items, selectedItemGuid]);
+
+  const mastodonPreview = useMemo(() => {
+    if (!selectedItem) return null;
+    return renderFormattedPreview(selectedItem, formatting, 'mastodon', envVars);
+  }, [selectedItem, formatting, envVars]);
+
+  const threadsPreview = useMemo(() => {
+    if (!selectedItem) return null;
+    return renderFormattedPreview(selectedItem, formatting, 'threads', envVars);
+  }, [selectedItem, formatting, envVars]);
+
+  const currentActionDefinition = useMemo(() => {
+    return ACTION_CARDS.find((c) => c.id === selectedActionType) || ACTION_CARDS[0];
+  }, [selectedActionType]);
+
+  const handleUpdateTrigger = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      localStorage.setItem(STORAGE_KEY_TRIGGER_URL, triggerFeedUrl);
+    } catch {
+      // ignore
+    }
+
+    setIsPolling(true);
+    const resolvedUrl = resolveEnvVariablesInString(triggerFeedUrl, envVars);
+    setStatusBanner(`Updating trigger & polling ${resolvedUrl}...`);
+
+    try {
+      const res = await fetch('/api/pipeline/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: 'ifttt-active-trigger',
+          feedName: 'RSS-Bridge Trigger',
+          bridgeUrl: resolvedUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        const incoming: NormalizedFeedItem[] = data.items;
+        setItems((prev) => {
+          const existing = new Set(prev.map((i) => i.guid));
+          const fresh = incoming.filter((i) => !existing.has(i.guid));
+          return [...fresh, ...prev];
+        });
+        setSelectedItemGuid(incoming[0].guid);
+      }
+      setStatusBanner('Trigger updated! Choose your action below.');
+      setViewMode('choose_action');
+    } catch {
+      setStatusBanner('Trigger URL saved.');
+      setViewMode('choose_action');
+    } finally {
+      setIsPolling(false);
+    }
+  };
+
+  const handleRunAppletNow = async () => {
+    if (!selectedItem || !mastodonPreview || !threadsPreview) return;
+    setIsPublishing(true);
+
+    const platforms: ('mastodon' | 'threads')[] =
+      activeServiceTab === 'both'
+        ? ['threads', 'mastodon']
+        : activeServiceTab === 'mastodon'
+          ? ['mastodon']
+          : ['threads'];
+
+    const mediaUrls =
+      selectedActionType === 'carousel'
+        ? actionCarouselUrls.split(',').map((s) => s.trim()).filter(Boolean)
+        : selectedItem.enclosures.length > 0
+          ? selectedItem.enclosures.map((e) => e.url)
+          : [actionMediaUrl];
+
+    try {
+      const res = await fetch('/api/pipeline/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemGuid: selectedItem.guid,
+          itemTitle: selectedItem.title,
+          feedId: selectedItem.feedId,
+          platforms,
+          actionType: selectedActionType,
+          mastodonPosts: mastodonPreview.posts,
+          threadsPosts: threadsPreview.posts,
+          linkUrl: resolveEnvVariablesInString(
+            actionLinkUrl.replace('{link}', selectedItem.link),
+            envVars
+          ),
+          mediaUrls,
+          visibility: formatting.mastodonVisibility,
+          credentials: {
+            mastodonInstanceUrl: getEnvValue(envVars, 'MASTODON_INSTANCE_URL', 'https://mastodon.social'),
+            mastodonAccessToken: getEnvValue(envVars, 'MASTODON_ACCESS_TOKEN', ''),
+            threadsUserId: getEnvValue(envVars, 'THREADS_USER_ID', ''),
+            threadsAccessToken: getEnvValue(envVars, 'THREADS_ACCESS_TOKEN', ''),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.traces && Array.isArray(data.traces)) {
+        setPublishTraces(data.traces);
+        setSeenLedger((prev) => [
+          {
+            guid: selectedItem.guid,
+            hashId: selectedItem.hashId,
+            feedId: selectedItem.feedId,
+            title: selectedItem.title,
+            status: platforms.length === 2 ? 'published_both' : platforms[0] === 'mastodon' ? 'published_mastodon' : 'published_threads',
+            reason: `Published via "${currentActionDefinition.title}" (${data.traces.length} API steps)`,
+            processedAt: new Date().toISOString(),
+          },
+          ...prev.filter((s) => s.guid !== selectedItem.guid),
+        ]);
+        setStatusBanner(`Published to ${platforms.join(' & ')}!`);
+        setViewMode('applet_home');
+      } else if (data.error) {
+        setStatusBanner(`Error: ${data.error}`);
+      }
+    } catch (err) {
+      setStatusBanner(err instanceof Error ? err.message : 'Publish failed');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white text-[#191919]">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 lg:px-10 py-4 bg-white border-b border-slate-200">
+        <a
+          href="#top"
+          onClick={(e) => {
+            e.preventDefault();
+            setViewMode('applet_home');
+          }}
+          className="text-xl font-extrabold tracking-tight text-[#191919]"
+        >
+          BridgeRelay
+        </a>
+
+        <nav className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600">
+          <button
+            type="button"
+            onClick={() => setViewMode('edit_trigger')}
+            className={`py-1 border-b-2 ${viewMode === 'edit_trigger' ? 'border-[#EA7600] text-[#EA7600]' : 'border-transparent hover:text-black'}`}
+          >
+            Edit Trigger (RSS)
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('choose_action')}
+            className={`py-1 border-b-2 ${viewMode === 'choose_action' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Threads & Mastodon Actions
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('edit_action')}
+            className={`py-1 border-b-2 ${viewMode === 'edit_action' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Configure Post Ingredients
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('applet_home')}
+            className={`py-1 border-b-2 ${viewMode === 'applet_home' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Applet
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('connections')}
+            className={`py-1 border-b-2 ${viewMode === 'connections' ? 'border-black text-black' : 'border-transparent hover:text-black'}`}
+          >
+            Dashboard Variables ({envVars.length})
+          </button>
+        </nav>
+
+        <button
+          type="button"
+          onClick={handleRunAppletNow}
+          disabled={isPublishing}
+          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-extrabold text-white bg-[#191919] rounded-full hover:bg-neutral-800 disabled:opacity-60"
+        >
+          <Send className="w-3.5 h-3.5" />
+          <span>{isPublishing ? 'Publishing...' : 'Run Applet Now'}</span>
+        </button>
+      </header>
+
+      {statusBanner && (
+        <div className="bg-emerald-800 text-white text-xs font-semibold text-center py-2 px-4">
+          {statusBanner}
+        </div>
+      )}
+
+      {/* VIEW: TRIGGER */}
+      {viewMode === 'edit_trigger' && (
+        <div className="flex-1 bg-[#E56B00] text-white flex flex-col items-center justify-center px-6 py-14">
+          <div className="w-full max-w-xl mx-auto flex flex-col items-center">
+            <div className="w-full flex items-center justify-between mb-4">
+              <button
+                type="button"
+                onClick={() => setViewMode('applet_home')}
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-white/90 hover:text-white"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back</span>
+              </button>
+            </div>
+
+            <h1 className="text-4xl font-extrabold text-center mb-6">Edit trigger</h1>
+            <Rss className="w-24 h-24 text-white mb-6" />
+
+            <form onSubmit={handleUpdateTrigger} className="w-full space-y-6">
+              <div>
+                <label className="block text-base font-extrabold text-white mb-2">Feed URL</label>
+                <textarea
+                  rows={4}
+                  required
+                  value={triggerFeedUrl}
+                  onChange={(e) => setTriggerFeedUrl(e.target.value)}
+                  className="w-full bg-white text-[#191919] rounded-2xl p-4 text-base focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUrlHelper((v) => !v)}
+                  className="mt-2 text-xs font-bold underline"
+                >
+                  {showUrlHelper ? 'Hide Presets' : 'Choose from Bridge Presets'}
+                </button>
+              </div>
+
+              {showUrlHelper && (
+                <div className="bg-black/20 rounded-2xl p-4 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {QUICK_BRIDGE_EXAMPLES.map((ex) => (
+                      <button
+                        key={ex.label}
+                        type="button"
+                        onClick={() => setTriggerFeedUrl(ex.url)}
+                        className="px-3 py-1.5 text-xs font-bold bg-white text-black rounded-lg"
+                      >
+                        {ex.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-center">
+                <button
+                  type="submit"
+                  disabled={isPolling}
+                  className="bg-white text-[#191919] font-extrabold text-xl px-12 py-4 rounded-full"
+                >
+                  {isPolling ? 'Checking Feed...' : 'Update trigger'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: CHOOSE ACTION */}
+      {viewMode === 'choose_action' && (
+        <div className="flex-1 flex flex-col bg-white">
+          <div className="bg-[#191919] text-white pt-10 pb-12 px-6 flex flex-col items-center">
+            <div className="flex items-center gap-2 bg-white/10 p-1 rounded-full mb-8">
+              {(['threads', 'mastodon', 'both'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveServiceTab(tab)}
+                  className={`px-4 py-1.5 text-xs font-bold rounded-full capitalize ${activeServiceTab === tab ? 'bg-white text-black' : 'text-white/80'}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-3 text-3xl font-extrabold border-4 border-white">
+              {activeServiceTab === 'mastodon' ? 'M' : '@'}
+            </div>
+            <h1 className="text-3xl font-extrabold capitalize">{activeServiceTab} Actions</h1>
+          </div>
+
+          <div className="max-w-5xl w-full mx-auto px-6 py-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ACTION_CARDS.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedActionType(card.id);
+                    setFormatting((prev) => ({ ...prev, template: card.defaultTemplate }));
+                    setViewMode('edit_action');
+                  }}
+                  className={`bg-[#191919] text-white rounded-2xl p-6 flex flex-col justify-between text-left min-h-[180px] hover:bg-neutral-900 ${selectedActionType === card.id ? 'ring-4 ring-[#EA7600]' : ''}`}
+                >
+                  <div>
+                    <h2 className="text-xl font-extrabold text-white mb-2">{card.title}</h2>
+                    <p className="text-xs text-white/80">
+                      {activeServiceTab === 'mastodon' ? card.mastodonDescription : card.threadsDescription}
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-white/50 pt-4">Click to configure</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: EDIT ACTION */}
+      {viewMode === 'edit_action' && (
+        <div className="flex-1 bg-[#191919] text-white flex flex-col items-center px-6 py-10">
+          <div className="w-full max-w-2xl mx-auto space-y-6">
+            <button
+              type="button"
+              onClick={() => setViewMode('choose_action')}
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-white/80"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to actions</span>
+            </button>
+
+            <h1 className="text-3xl font-extrabold text-center">{currentActionDefinition.title}</h1>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold mb-2">Post Template</label>
+                <textarea
+                  rows={4}
+                  value={formatting.template}
+                  onChange={(e) => setFormatting((prev) => ({ ...prev, template: e.target.value }))}
+                  className="w-full bg-white text-black rounded-xl p-3 text-sm focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {['{title}', '{summary}', '{link}', '{author}', '{tags}'].map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      onClick={() => setFormatting((prev) => ({ ...prev, template: `${prev.template} ${tok}` }))}
+                      className="px-2 py-1 text-xs font-bold bg-white text-black rounded"
+                    >
+                      + {tok}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {selectedActionType === 'image' && (
+                <div>
+                  <label className="block text-sm font-bold mb-1">Fallback Image URL</label>
+                  <input
+                    type="text"
+                    value={actionMediaUrl}
+                    onChange={(e) => setActionMediaUrl(e.target.value)}
+                    className="w-full bg-white text-black rounded-lg p-2.5 text-xs font-mono"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => setViewMode('applet_home')}
+                className="bg-white text-black font-extrabold text-lg px-10 py-3 rounded-full"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: APPLET HOME */}
+      {viewMode === 'applet_home' && (
+        <div className="flex-1 max-w-3xl w-full mx-auto px-6 py-10 space-y-8">
+          <h1 className="text-3xl font-extrabold text-center">Your Active Applet</h1>
+
+          <div className="space-y-4">
+            <div className="bg-[#E56B00] text-white rounded-2xl p-6 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-white/70">If This</div>
+                <div className="text-xl font-extrabold">New feed item (RSS)</div>
+                <div className="text-xs font-mono truncate max-w-md mt-1">{triggerFeedUrl}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('edit_trigger')}
+                className="px-4 py-2 bg-white text-black text-xs font-bold rounded-full"
+              >
+                Edit
+              </button>
+            </div>
+
+            <div className="bg-[#191919] text-white rounded-2xl p-6 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-white/70">Then That</div>
+                <div className="text-xl font-extrabold">{currentActionDefinition.title}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode('choose_action')}
+                className="px-4 py-2 bg-white text-black text-xs font-bold rounded-full"
+              >
+                Change
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={handleRunAppletNow}
+              disabled={isPublishing}
+              className="bg-[#191919] text-white font-extrabold text-lg px-10 py-4 rounded-full"
+            >
+              {isPublishing ? 'Publishing...' : 'Run Applet Now'}
+            </button>
+          </div>
+
+          {publishTraces.length > 0 && (
+            <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-slate-50">
+              <h3 className="text-xs font-extrabold">Last Execution Log ({publishTraces.length} API Calls)</h3>
+              {publishTraces.map((t) => (
+                <div key={t.step} className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs flex justify-between">
+                  <span className="font-mono">{t.platform}: {t.endpoint}</span>
+                  <span className="font-bold text-emerald-700">HTTP {t.httpStatus}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: CONNECTIONS & ENV */}
+      {viewMode === 'connections' && (
+        <div className="flex-1 max-w-4xl w-full mx-auto px-6 py-10 space-y-6">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-extrabold">Credentials & Variables</h1>
+            <button
+              type="button"
+              onClick={() => setViewMode('applet_home')}
+              className="px-4 py-2 bg-black text-white text-xs font-bold rounded-full"
+            >
+              Done
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="p-3">Variable</th>
+                  <th className="p-3">Value</th>
+                  <th className="p-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {envVars.map((v) => (
+                  <tr key={v.id}>
+                    <td className="p-3 font-mono font-bold">{v.key}</td>
+                    <td className="p-3">
+                      <input
+                        type={v.isSecret && !revealedSecrets[v.id] ? 'password' : 'text'}
+                        value={v.value}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          updateAndSaveEnvVars((prev) =>
+                            prev.map((item) => (item.id === v.id ? { ...item, value: val } : item))
+                          );
+                        }}
+                        className="w-full p-1.5 border border-slate-300 rounded font-mono text-xs"
+                      />
+                    </td>
+                    <td className="p-3 text-right">
+                      {v.isSecret && (
+                        <button
+                          type="button"
+                          onClick={() => setRevealedSecrets((prev) => ({ ...prev, [v.id]: !prev[v.id] }))}
+                          className="p-1 text-slate-500"
+                        >
+                          {revealedSecrets[v.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+# .ai_backups\20261027_023525_lib_db.ts
+
+```ts
+// In lib/db.ts:
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'seen_ledger.json');
+```
+
+# .ai_backups\20261027_023525_next.config.ts
+
+```ts
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
+  },
+};
+
+export default nextConfig;
+```
+
+# .ai_backups\20261027_023525_package.json
+
+```json
+{
+  "name": "ai-studio-applet",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "clean": "next clean"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "@hookform/resolvers": "^5.2.1",
+    "autoprefixer": "^10.4.21",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "motion": "^12.23.24",
+    "next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.11",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.0.8",
+    "firebase-tools": "^15.0.0",
+    "tailwindcss": "4.1.11",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "5.9.3"
+  }
+}
+```
+
+# .ai_backups\20261027_023525_Vercel_Next.js
+
+```js
+https://your-domain.vercel.app/api/cron
+```
+
+# .ai_backups\20261027_023526_lib_utils.ts
+
+```ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+```
+
+# .ai_backups\20261027_023527_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const { items } = await pollRes.json();
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# .ai_backups\20261027_023527_lib_utils.ts
+
+```ts
+git add .
+git commit -m "Fix Vercel 404s, add serverless storage and real publishing"
+git push
+```
+
+# .ai_backups\20261027_023527_package.json
+
+```json
+{
+  "name": "bridgerelay",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
+    "lucide-react": "^0.553.0",
+    "next": "^15.4.9",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.20.0",
+    "eslint-config-next": "^15.4.9",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.3"
+  }
+}
+```
+
+# .ai_backups\20261027_023528_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+  NormalizedFeedItem,
+  MediaEnclosure,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const data = (await pollRes.json()) as { items?: NormalizedFeedItem[] };
+      const items: NormalizedFeedItem[] = data.items || [];
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e: MediaEnclosure) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# .ai_backups\20261027_023619_package.json
+
+```json
+git add postcss.config.mjs package.json
+git commit -m "Fix PostCSS config and add autoprefixer"
+git push
+```
+
+# .ai_backups\20261027_023701_app_api_pipeline_poll_route.ts
+
+```ts
+git add app/api/pipeline/poll/route.ts app/api/cron/route.ts
+git commit -m "Fix route files and add explicit TypeScript enclosures types"
+git push
+```
+
+# .ai_backups\20261027_023711_app_api_pipeline_poll_route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { XMLParser } from 'fast-xml-parser';
+import {
+  cleanHtmlToPlainText,
+  computeDeterministicHash,
+  extractImagesFromHtml,
+  MediaEnclosure,
+  NormalizedFeedItem,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  trimValues: true,
+  cdataPropName: '__cdata',
+});
+
+function getText(node: unknown): string {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if (obj.__cdata) return String(obj.__cdata);
+    if (obj['#text']) return String(obj['#text']);
+  }
+  return String(node);
+}
+
+export function parseXmlFeed(xmlText: string, feedId: string, feedName: string): NormalizedFeedItem[] {
+  const items: NormalizedFeedItem[] = [];
+  const parsed = xmlParser.parse(xmlText);
+
+  let rawList = parsed?.rss?.channel?.item;
+  if (!rawList) {
+    rawList = parsed?.feed?.entry;
+  }
+
+  if (!rawList) return [];
+  const entries: Record<string, any>[] = Array.isArray(rawList) ? rawList : [rawList];
+
+  for (const entry of entries.slice(0, 20)) {
+    const rawTitle = getText(entry.title) || 'Untitled Feed Entry';
+    const title = cleanHtmlToPlainText(rawTitle, false);
+
+    let link = '';
+    if (typeof entry.link === 'string') {
+      link = entry.link;
+    } else if (entry.link?.['@_href']) {
+      link = entry.link['@_href'];
+    } else if (Array.isArray(entry.link)) {
+      const alt = entry.link.find((l: Record<string, string>) => l['@_rel'] === 'alternate');
+      link = alt?.['@_href'] || entry.link[0]?.['@_href'] || getText(entry.link[0]);
+    }
+
+    const rawGuid = getText(entry.guid) || getText(entry.id) || link || `${feedId}-${title}`;
+    const rawHtml =
+      getText(entry['content:encoded']) ||
+      getText(entry.content) ||
+      getText(entry.description) ||
+      getText(entry.summary) ||
+      '';
+
+    const author =
+      cleanHtmlToPlainText(
+        getText(entry.author?.name) || getText(entry.author) || getText(entry['dc:creator']),
+        false
+      ) || 'bridge-author';
+
+    const pubDate =
+      getText(entry.pubDate) ||
+      getText(entry.published) ||
+      getText(entry.updated) ||
+      new Date().toISOString();
+
+    const tags: string[] = [];
+    const rawCats = entry.category;
+    if (rawCats) {
+      const catList = Array.isArray(rawCats) ? rawCats : [rawCats];
+      for (const cat of catList) {
+        const val = typeof cat === 'string' ? cat : cat['@_term'] || getText(cat);
+        if (val && tags.length < 6) tags.push(val);
+      }
+    }
+
+    const enclosures: MediaEnclosure[] = [];
+    const rawEnc = entry.enclosure;
+    if (rawEnc) {
+      const encList = Array.isArray(rawEnc) ? rawEnc : [rawEnc];
+      for (const enc of encList) {
+        if (enc?.['@_url']) {
+          enclosures.push({
+            url: enc['@_url'],
+            mimeType: enc['@_type'] || 'image/jpeg',
+            source: 'enclosure',
+          });
+        }
+      }
+    }
+
+    for (const img of extractImagesFromHtml(rawHtml)) {
+      if (!enclosures.some((e: MediaEnclosure) => e.url === img.url)) {
+        enclosures.push(img);
+      }
+    }
+
+    items.push({
+      guid: rawGuid,
+      hashId: computeDeterministicHash(rawGuid),
+      feedId,
+      feedName,
+      title,
+      rawHtml,
+      cleanSummary: cleanHtmlToPlainText(rawHtml, true),
+      link: link || 'https://rss-bridge.org',
+      author,
+      publishedAt: Number.isNaN(Date.parse(pubDate))
+        ? new Date().toISOString()
+        : new Date(pubDate).toISOString(),
+      tags: tags.length > 0 ? tags : ['Syndicated'],
+      enclosures,
+    });
+  }
+
+  return items;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { feedId, feedName, bridgeUrl } = body as {
+      feedId: string;
+      feedName: string;
+      bridgeUrl: string;
+    };
+
+    if (!bridgeUrl) {
+      return NextResponse.json({ error: 'bridgeUrl is required' }, { status: 400 });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const res = await fetch(bridgeUrl, {
+      headers: {
+        'User-Agent': 'BridgeRelay-Pipeline/2.0 (+https://rss-bridge.org)',
+        Accept: 'application/json, application/atom+xml, application/rss+xml, text/xml, */*',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: `Upstream bridge returned HTTP ${res.status}: ${res.statusText}` },
+        { status: 502 }
+      );
+    }
+
+    const text = await res.text();
+
+    if (text.trim().startsWith('{')) {
+      const parsed = JSON.parse(text);
+      const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+      const normalized: NormalizedFeedItem[] = rawItems.slice(0, 20).map((entry: Record<string, unknown>, idx: number) => {
+        const guid = String(entry.id || entry.url || `${feedId}-${idx}`);
+        const rawHtml = String(entry.content_html || entry.content_text || entry.summary || '');
+        const enclosures: MediaEnclosure[] = [];
+
+        if (Array.isArray(entry.attachments)) {
+          for (const att of entry.attachments) {
+            if (att && typeof att === 'object' && 'url' in att) {
+              enclosures.push({
+                url: String((att as { url: string }).url),
+                mimeType: String((att as { mime_type?: string }).mime_type || 'image/jpeg'),
+                source: 'enclosure',
+              });
+            }
+          }
+        }
+        for (const img of extractImagesFromHtml(rawHtml)) {
+          if (!enclosures.some((e: MediaEnclosure) => e.url === img.url)) enclosures.push(img);
+        }
+
+        const authorObj = entry.author as { name?: string } | undefined;
+        return {
+          guid,
+          hashId: computeDeterministicHash(guid),
+          feedId,
+          feedName,
+          title: cleanHtmlToPlainText(String(entry.title || 'Untitled Entry'), false),
+          rawHtml,
+          cleanSummary: cleanHtmlToPlainText(rawHtml, true),
+          link: String(entry.url || bridgeUrl),
+          author: authorObj?.name || 'bridge-author',
+          publishedAt: String(entry.date_modified || entry.date_published || new Date().toISOString()),
+          tags: Array.isArray(entry.tags) ? entry.tags.map(String) : ['RSSBridge'],
+          enclosures,
+        };
+      });
+
+      return NextResponse.json({
+        source: 'live_bridge',
+        items: normalized,
+        polledAt: new Date().toISOString(),
+      });
+    }
+
+    const xmlItems = parseXmlFeed(text, feedId, feedName);
+    return NextResponse.json({
+      source: 'live_bridge',
+      items: xmlItems,
+      polledAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to poll feed' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+# .eslintrc.json
+
+```json
+{
+  "extends": "next"
+}
+
+```
+
+# .gitignore
+
+```
+node_modules/
+.next/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+```
+
+# app\api\pipeline\poll\route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { isItemSeen } from '@/lib/db';
+import {
+  evaluateFilterRules,
+  renderFormattedPreview,
+  INITIAL_BRIDGE_FEEDS,
+  NormalizedFeedItem,
+  MediaEnclosure,
+} from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const host = req.headers.get('host') || 'localhost:3000';
+  const protocol = host.includes('localhost') ? 'http' : 'https';
+  const baseUrl = `${protocol}://${host}`;
+
+  const results = [];
+
+  for (const feed of INITIAL_BRIDGE_FEEDS.filter((f) => f.enabled)) {
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/pipeline/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedId: feed.id,
+          feedName: feed.name,
+          bridgeUrl: feed.bridgeUrl.replace(
+            '{RSS_BRIDGE_BASE_URL}',
+            process.env.RSS_BRIDGE_BASE_URL || 'https://rss-bridge.org/bridge01'
+          ),
+        }),
+      });
+
+      if (!pollRes.ok) continue;
+      const data = (await pollRes.json()) as { items?: NormalizedFeedItem[] };
+      const items: NormalizedFeedItem[] = data.items || [];
+
+      for (const item of items) {
+        if (isItemSeen(item.hashId)) continue;
+
+        const filterCheck = evaluateFilterRules(item, {
+          keywordWhitelist: [],
+          keywordBlacklist: ['sponsored', 'ad'],
+          regexPattern: '',
+          regexInvert: false,
+          authorWhitelist: [],
+          minContentLength: 10,
+          maxContentLength: 4000,
+          requireMediaAttachment: false,
+          stripHtmlPreserveBreaks: true,
+          extractInlineImages: true,
+        });
+
+        if (!filterCheck.passed) continue;
+
+        const mastoPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'mastodon'
+        );
+
+        const threadsPreview = renderFormattedPreview(
+          item,
+          {
+            template: '{title}\n\n{summary}\n\n{link}\n{tags}',
+            mastodonMaxChars: 500,
+            threadsMaxChars: 500,
+            mastodonCountUrlAs23Chars: true,
+            truncationStrategy: 'ellipsis',
+            includeMediaAttachment: true,
+            defaultHashtags: ['RSSBridge'],
+            mastodonVisibility: 'public',
+          },
+          'threads'
+        );
+
+        const pubRes = await fetch(`${baseUrl}/api/pipeline/publish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuid: item.guid,
+            itemTitle: item.title,
+            feedId: feed.id,
+            platforms: ['mastodon', 'threads'],
+            actionType: item.enclosures.length > 0 ? 'image' : 'text',
+            mastodonPosts: mastoPreview.posts,
+            threadsPosts: threadsPreview.posts,
+            mediaUrls: item.enclosures.map((e: MediaEnclosure) => e.url),
+          }),
+        });
+
+        results.push({ item: item.title, published: pubRes.ok });
+        break;
+      }
+    } catch (e) {
+      console.error(`Cron error on feed ${feed.id}:`, e);
+    }
+  }
+
+  return NextResponse.json({
+    status: 'cron_completed',
+    processedAt: new Date().toISOString(),
+    results,
+  });
+}
+```
+
+# app\api\pipeline\publish\route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { markItemSeen } from '@/lib/db';
+import { computeDeterministicHash } from '@/lib/pipeline-engine';
+
+export const dynamic = 'force-dynamic';
+
+export interface PublishStepTrace {
+  step: number;
+  platform: 'mastodon' | 'threads';
+  actionType?: string;
+  endpoint: string;
+  method: 'POST' | 'GET';
+  status: 'success' | 'error';
+  httpStatus: number;
+  requestPayload: Record<string, unknown>;
+  responsePayload: Record<string, unknown>;
+  durationMs: number;
+}
+
+async function uploadMediaToMastodon(
+  mediaUrl: string,
+  mastodonInstance: string,
+  token: string
+): Promise<string> {
+  const mediaRes = await fetch(mediaUrl);
+  if (!mediaRes.ok) throw new Error(`Failed to download media enclosure: ${mediaUrl}`);
+  const blob = await mediaRes.blob();
+
+  const formData = new FormData();
+  formData.append('file', blob, 'media.jpg');
+  formData.append('description', 'Syndicated via BridgeRelay');
+
+  const uploadRes = await fetch(`${mastodonInstance}/api/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Mastodon media upload failed (HTTP ${uploadRes.status}): ${errText}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  return uploadData.id;
+}
+
+async function pollThreadsContainerReady(
+  containerId: string,
+  threadsToken: string,
+  maxAttempts = 6
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const statusRes = await fetch(
+      `https://graph.threads.net/v1.0/${containerId}?fields=status,error_message&access_token=${threadsToken}`
+    );
+    if (statusRes.ok) {
+      const data = await statusRes.json();
+      if (data.status === 'FINISHED') return;
+      if (data.status === 'ERROR') {
+        throw new Error(`Threads container error: ${data.error_message || 'Container failed'}`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      itemGuid,
+      itemTitle = 'Feed Item',
+      feedId = 'feed-default',
+      platforms,
+      actionType = 'text',
+      mastodonPosts,
+      threadsPosts,
+      linkUrl = '',
+      mediaUrls = [],
+      visibility = 'public',
+      credentials,
+    } = body as {
+      itemGuid?: string;
+      itemTitle?: string;
+      feedId?: string;
+      platforms: ('mastodon' | 'threads')[];
+      actionType?: 'text' | 'link' | 'image' | 'video' | 'carousel';
+      mastodonPosts: string[];
+      threadsPosts: string[];
+      linkUrl?: string;
+      mediaUrls?: string[];
+      visibility?: 'public' | 'unlisted' | 'private';
+      credentials?: {
+        mastodonInstanceUrl?: string;
+        mastodonAccessToken?: string;
+        threadsUserId?: string;
+        threadsAccessToken?: string;
+      };
+    };
+
+    const traces: PublishStepTrace[] = [];
+    let stepCounter = 1;
+
+    const mastodonInstance = (
+      credentials?.mastodonInstanceUrl ||
+      process.env.MASTODON_INSTANCE_URL ||
+      'https://mastodon.social'
+    ).replace(/\/$/, '');
+    const mastodonToken = (
+      credentials?.mastodonAccessToken ||
+      process.env.MASTODON_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    const threadsUserId = (
+      credentials?.threadsUserId ||
+      process.env.THREADS_USER_ID ||
+      ''
+    ).trim();
+    const threadsToken = (
+      credentials?.threadsAccessToken ||
+      process.env.THREADS_ACCESS_TOKEN ||
+      ''
+    ).trim();
+
+    let publishedMastodonId: string | undefined;
+    let publishedThreadsId: string | undefined;
+
+    // 1. Mastodon
+    if (platforms.includes('mastodon') && mastodonPosts?.length > 0) {
+      if (!mastodonToken) throw new Error('Mastodon access token is missing');
+
+      const uploadedMediaIds: string[] = [];
+      if (
+        (actionType === 'image' || actionType === 'video' || actionType === 'carousel') &&
+        mediaUrls.length > 0
+      ) {
+        const mediaToUpload = actionType === 'carousel' ? mediaUrls.slice(0, 4) : [mediaUrls[0]];
+        for (const url of mediaToUpload) {
+          const t0 = Date.now();
+          const mediaId = await uploadMediaToMastodon(url, mastodonInstance, mastodonToken);
+          uploadedMediaIds.push(mediaId);
+          traces.push({
+            step: stepCounter++,
+            platform: 'mastodon',
+            actionType,
+            endpoint: `${mastodonInstance}/api/v2/media`,
+            method: 'POST',
+            status: 'success',
+            httpStatus: 200,
+            requestPayload: { file_url: url },
+            responsePayload: { id: mediaId },
+            durationMs: Date.now() - t0,
+          });
+        }
+      }
+
+      let inReplyToId: string | undefined;
+      for (let i = 0; i < mastodonPosts.length; i++) {
+        const postText = mastodonPosts[i];
+        const statusEndpoint = `${mastodonInstance}/api/v1/statuses`;
+        const reqPayload: Record<string, unknown> = {
+          status: postText,
+          visibility,
+          ...(i === 0 && uploadedMediaIds.length > 0 ? { media_ids: uploadedMediaIds } : {}),
+          ...(inReplyToId ? { in_reply_to_id: inReplyToId } : {}),
+        };
+
+        const t0 = Date.now();
+        const res = await fetch(statusEndpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${mastodonToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(reqPayload),
+        });
+        const resData = await res.json();
+
+        if (!res.ok) {
+          throw new Error(`Mastodon status error (HTTP ${res.status}): ${JSON.stringify(resData)}`);
+        }
+
+        inReplyToId = String(resData.id);
+        if (i === 0) publishedMastodonId = inReplyToId;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'mastodon',
+          actionType,
+          endpoint: statusEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: res.status,
+          requestPayload: reqPayload,
+          responsePayload: resData,
+          durationMs: Date.now() - t0,
+        });
+      }
+    }
+
+    // 2. Meta Threads
+    if (platforms.includes('threads') && threadsPosts?.length > 0) {
+      if (!threadsUserId || !threadsToken) {
+        throw new Error('Meta Threads User ID or Access Token is missing');
+      }
+
+      const containerEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads`;
+      const publishEndpoint = `https://graph.threads.net/v1.0/${threadsUserId}/threads_publish`;
+      const postText = threadsPosts[0];
+
+      let containerIdToPublish = '';
+
+      if (actionType === 'carousel' && mediaUrls.length >= 2) {
+        const childContainerIds: string[] = [];
+        for (const mUrl of mediaUrls.slice(0, 5)) {
+          const t0 = Date.now();
+          const isVideo = mUrl.endsWith('.mp4');
+          const childParams = new URLSearchParams({
+            is_carousel_item: 'true',
+            media_type: isVideo ? 'VIDEO' : 'IMAGE',
+            [isVideo ? 'video_url' : 'image_url']: mUrl,
+            access_token: threadsToken,
+          });
+
+          const childRes = await fetch(`${containerEndpoint}?${childParams.toString()}`, { method: 'POST' });
+          const childData = await childRes.json();
+          if (!childRes.ok) throw new Error(`Threads carousel child failed: ${JSON.stringify(childData)}`);
+          childContainerIds.push(childData.id);
+
+          traces.push({
+            step: stepCounter++,
+            platform: 'threads',
+            actionType: 'carousel_item',
+            endpoint: containerEndpoint,
+            method: 'POST',
+            status: 'success',
+            httpStatus: childRes.status,
+            requestPayload: { media_url: mUrl },
+            responsePayload: childData,
+            durationMs: Date.now() - t0,
+          });
+        }
+
+        const parentParams = new URLSearchParams({
+          media_type: 'CAROUSEL',
+          children: childContainerIds.join(','),
+          text: postText,
+          access_token: threadsToken,
+        });
+        const parentRes = await fetch(`${containerEndpoint}?${parentParams.toString()}`, { method: 'POST' });
+        const parentData = await parentRes.json();
+        if (!parentRes.ok) throw new Error(`Threads parent carousel failed: ${JSON.stringify(parentData)}`);
+        containerIdToPublish = parentData.id;
+      } else {
+        const isImage = actionType === 'image' && mediaUrls.length > 0;
+        const isVideo = actionType === 'video' && mediaUrls.length > 0;
+        const mediaType = isImage ? 'IMAGE' : isVideo ? 'VIDEO' : 'TEXT';
+
+        const params = new URLSearchParams({
+          media_type: mediaType,
+          text: postText,
+          access_token: threadsToken,
+          ...(actionType === 'link' && linkUrl ? { link_attachment: linkUrl } : {}),
+          ...(isImage ? { image_url: mediaUrls[0] } : {}),
+          ...(isVideo ? { video_url: mediaUrls[0] } : {}),
+        });
+
+        const t0 = Date.now();
+        const createRes = await fetch(`${containerEndpoint}?${params.toString()}`, { method: 'POST' });
+        const createData = await createRes.json();
+        if (!createRes.ok) throw new Error(`Threads container creation failed: ${JSON.stringify(createData)}`);
+        containerIdToPublish = createData.id;
+
+        traces.push({
+          step: stepCounter++,
+          platform: 'threads',
+          actionType,
+          endpoint: containerEndpoint,
+          method: 'POST',
+          status: 'success',
+          httpStatus: createRes.status,
+          requestPayload: { mediaType, textLength: postText.length },
+          responsePayload: createData,
+          durationMs: Date.now() - t0,
+        });
+      }
+
+      await pollThreadsContainerReady(containerIdToPublish, threadsToken);
+
+      const tPublish = Date.now();
+      const pubParams = new URLSearchParams({
+        creation_id: containerIdToPublish,
+        access_token: threadsToken,
+      });
+      const pubRes = await fetch(`${publishEndpoint}?${pubParams.toString()}`, { method: 'POST' });
+      const pubData = await pubRes.json();
+      if (!pubRes.ok) throw new Error(`Threads publish failed: ${JSON.stringify(pubData)}`);
+      publishedThreadsId = pubData.id;
+
+      traces.push({
+        step: stepCounter++,
+        platform: 'threads',
+        actionType,
+        endpoint: publishEndpoint,
+        method: 'POST',
+        status: 'success',
+        httpStatus: pubRes.status,
+        requestPayload: { creation_id: containerIdToPublish },
+        responsePayload: pubData,
+        durationMs: Date.now() - tPublish,
+      });
+    }
+
+    // Persist to server deduplication store
+    if (itemGuid) {
+      markItemSeen({
+        guidHash: computeDeterministicHash(itemGuid),
+        guid: itemGuid,
+        feedId,
+        title: itemTitle,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+        mastodonStatusId: publishedMastodonId,
+        threadsPostId: publishedThreadsId,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      executedAt: new Date().toISOString(),
+      traces,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Publish execution failed' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+# app\api\pipeline\verify\route.ts
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { platform, mastodonInstanceUrl, mastodonAccessToken, threadsUserId, threadsAccessToken } = body;
+
+    if (platform === 'mastodon') {
+      const instance = (mastodonInstanceUrl || process.env.MASTODON_INSTANCE_URL || 'https://mastodon.social').replace(/\/$/, '');
+      const token = (mastodonAccessToken || process.env.MASTODON_ACCESS_TOKEN || '').trim();
+
+      if (!token) {
+        return NextResponse.json({ verified: false, message: 'Missing Mastodon token' }, { status: 400 });
+      }
+
+      const res = await fetch(`${instance}/api/v1/accounts/verify_credentials`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const account = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${account.username}@${new URL(instance).hostname}`,
+          displayName: account.display_name || account.username,
+        });
+      }
+      return NextResponse.json({ verified: false, message: 'Invalid Mastodon credentials' }, { status: 401 });
+    }
+
+    if (platform === 'threads') {
+      const userId = (threadsUserId || process.env.THREADS_USER_ID || '').trim();
+      const token = (threadsAccessToken || process.env.THREADS_ACCESS_TOKEN || '').trim();
+
+      if (!userId || !token) {
+        return NextResponse.json({ verified: false, message: 'Missing Threads User ID or Token' }, { status: 400 });
+      }
+
+      const res = await fetch(`https://graph.threads.net/v1.0/${userId}?fields=id,username&access_token=${token}`);
+      if (res.ok) {
+        const profile = await res.json();
+        return NextResponse.json({
+          verified: true,
+          handle: `@${profile.username || userId}`,
+        });
+      }
+      return NextResponse.json({ verified: false, message: 'Invalid Threads credentials' }, { status: 401 });
+    }
+
+    return NextResponse.json({ error: 'Invalid platform' }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Verification failed' }, { status: 500 });
+  }
+}
 ```
 
 # app\globals.css
@@ -802,1280 +4967,303 @@ export default function HomePage() {
 
 ```
 
+# bridge.py
+
+```py
+import os, sys, json, shutil, subprocess
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = 8999
+PROJECT_DIR = os.path.abspath(os.getcwd())
+PROJECT_NAME = os.path.basename(PROJECT_DIR)
+BACKUP_DIR = os.path.join(PROJECT_DIR, ".ai_backups")
+EXCLUDE_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".cache", ".ai_backups"}
+
+def open_in_vscode(abs_path, line=1):
+    try:
+        subprocess.Popen(["code", "-g", f"{abs_path}:{line}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except FileNotFoundError:
+        pass
+    try:
+        subprocess.Popen(["cmd", "/c", "start", f"vscode://file/{abs_path}:{line}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+def find_file(filename):
+    clean_path = filename.strip().replace("\\", "/").lstrip("/")
+    direct = os.path.join(PROJECT_DIR, clean_path.replace("/", os.sep))
+    if os.path.exists(direct):
+        return clean_path, direct
+
+    norm_target = clean_path.lower()
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for f in files:
+            abs_p = os.path.join(root, f)
+            rel_p = os.path.relpath(abs_p, PROJECT_DIR).replace(os.sep, "/")
+            if rel_p.lower() == norm_target or rel_p.lower().endswith("/" + norm_target):
+                return rel_p, abs_p
+
+    base_target = os.path.basename(clean_path).lower()
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for f in files:
+            if f.lower() == base_target:
+                abs_p = os.path.join(root, f)
+                return os.path.relpath(abs_p, PROJECT_DIR).replace(os.sep, "/"), abs_p
+
+    return None, None
+
+def backup_file(abs_path):
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        rel = os.path.relpath(abs_path, PROJECT_DIR).replace(os.sep, "_")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = os.path.join(BACKUP_DIR, f"{ts}_{rel}")
+        shutil.copy2(abs_path, dest)
+    except Exception:
+        pass
+
+def replace_snippet_in_content(full_content, find_snip, new_snip):
+    if find_snip in full_content:
+        count = full_content.count(find_snip)
+        pos = full_content.find(find_snip)
+        line_no = full_content[:pos].count("\n") + 1
+        updated = full_content.replace(find_snip, new_snip)
+        return updated, line_no, count
+
+    norm_full = full_content.replace("\r\n", "\n")
+    norm_find = find_snip.replace("\r\n", "\n").strip()
+    norm_new = new_snip.replace("\r\n", "\n")
+
+    if norm_find in norm_full:
+        count = norm_full.count(norm_find)
+        pos = norm_full.find(norm_find)
+        line_no = norm_full[:pos].count("\n") + 1
+        updated = norm_full.replace(norm_find, norm_new)
+        return updated, line_no, count
+
+    find_lines = [l.strip() for l in norm_find.splitlines() if l.strip()]
+    if find_lines:
+        file_lines = norm_full.splitlines(keepends=True)
+        first_line = find_lines[0]
+        for idx, line in enumerate(file_lines):
+            if first_line in line:
+                match = True
+                for j, f_line in enumerate(find_lines):
+                    if idx + j >= len(file_lines) or f_line not in file_lines[idx + j]:
+                        match = False
+                        break
+                if match:
+                    line_no = idx + 1
+                    prefix = "".join(file_lines[:idx])
+                    suffix = "".join(file_lines[idx + len(find_lines):])
+                    if not norm_new.endswith("\n"): norm_new += "\n"
+                    return prefix + norm_new + suffix, line_no, 1
+
+    return None, None, 0
+
+def generate_digest():
+    tree_lines = []
+    file_count = 0
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+        level = root.replace(PROJECT_DIR, "").count(os.sep)
+        indent = "  " * level
+        folder = os.path.basename(root)
+        if level > 0:
+            tree_lines.append(f"{indent}📁 {folder}/")
+        for f in sorted(files):
+            if not f.startswith("."):
+                tree_lines.append(f"{indent}  📄 {f}")
+                file_count += 1
+                if file_count >= 120: break
+        if file_count >= 120:
+            tree_lines.append("  ... (truncated)")
+            break
+    return "\n".join(tree_lines), file_count
+
+def get_project_files():
+    file_list = []
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+        for f in sorted(files):
+            if not f.startswith("."):
+                abs_p = os.path.join(root, f)
+                rel_p = os.path.relpath(abs_p, PROJECT_DIR).replace(os.sep, "/")
+                file_list.append(rel_p)
+                if len(file_list) >= 300: break
+        if len(file_list) >= 300: break
+    return file_list
+
+class BridgeServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+class Handler(BaseHTTPRequestHandler):
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+
+    def _json(self, status, payload):
+        b = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self._cors()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.end_headers()
+
+    def do_GET(self):
+        path_only = self.path.split("?")[0]
+        if path_only == "/status":
+            self._json(200, {"bridge": "ai-bridge", "status": "ok", "project": PROJECT_NAME, "root": PROJECT_DIR})
+        elif path_only == "/digest":
+            tree, count = generate_digest()
+            self._json(200, {"bridge": "ai-bridge", "project": PROJECT_NAME, "tree": tree, "file_count": count})
+        elif path_only == "/files":
+            files = get_project_files()
+            self._json(200, {"bridge": "ai-bridge", "project": PROJECT_NAME, "files": files, "count": len(files)})
+        elif path_only == "/get_bridge_source":
+            try:
+                with open(__file__, "r", encoding="utf-8") as f:
+                    src = f.read().encode("utf-8")
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "text/x-python; charset=utf-8")
+                self.send_header("Content-Length", str(len(src)))
+                self.end_headers()
+                self.wfile.write(src)
+            except Exception:
+                self._json(500, {"error": "Could not read source"})
+        else:
+            self._json(404, {"error": "Not found"})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+        path_only = self.path.split("?")[0]
+
+        if path_only == "/find":
+            rel, abs_p = find_file(body.get("filename", ""))
+            if not rel: return self._json(200, {"bridge": "ai-bridge", "found": False})
+            open_in_vscode(abs_p, 1)
+            self._json(200, {"bridge": "ai-bridge", "found": True, "path": rel})
+
+        elif path_only in ("/replace", "/create"):
+            raw_path = body.get("path", "").strip()
+            content = body.get("content", "")
+            find_snip = body.get("find_snippet", None)
+
+            rel, abs_p = find_file(raw_path)
+            if not abs_p:
+                abs_p = os.path.join(PROJECT_DIR, raw_path.lstrip("/\\"))
+                rel = os.path.relpath(abs_p, PROJECT_DIR).replace(os.sep, "/")
+
+            os.makedirs(os.path.dirname(abs_p) or PROJECT_DIR, exist_ok=True)
+
+            if find_snip and os.path.exists(abs_p):
+                backup_file(abs_p)
+                with open(abs_p, "r", encoding="utf-8", errors="ignore") as f:
+                    orig = f.read()
+                updated, line_no, count = replace_snippet_in_content(orig, find_snip, content)
+                if updated is not None:
+                    with open(abs_p, "w", encoding="utf-8") as f:
+                        f.write(updated)
+                    open_in_vscode(abs_p, line_no)
+                    return self._json(200, {"bridge": "ai-bridge", "success": True, "path": rel, "replaced_snippet": True, "count": count, "line": line_no})
+                else:
+                    return self._json(200, {"bridge": "ai-bridge", "success": False, "error": "Snippet not found in target file."})
+
+            if os.path.exists(abs_p):
+                with open(abs_p, "r", encoding="utf-8", errors="ignore") as f:
+                    orig = f.read()
+                orig_lines = len(orig.splitlines())
+                new_lines = len(content.splitlines())
+                is_full = any(content.strip().startswith(kw) for kw in ["import ", "export ", "<!DOCTYPE", "<?php", "package "])
+                if orig_lines > 20 and new_lines <= 5 and not is_full:
+                    return self._json(200, {
+                        "bridge": "ai-bridge",
+                        "success": False,
+                        "error": f"Safety Guard: File has {orig_lines} lines. Refusing to overwrite full file with a {new_lines}-line snippet."
+                    })
+
+            backup_file(abs_p)
+            with open(abs_p, "w", encoding="utf-8") as f:
+                f.write(content)
+            open_in_vscode(abs_p, 1)
+            self._json(200, {"bridge": "ai-bridge", "success": True, "path": rel, "replaced_snippet": False})
+
+        elif path_only == "/batch_replace":
+            files = body.get("files", [])
+            updated = []
+            for item in files:
+                p, c = item.get("path", "").strip(), item.get("content", "")
+                if not p or not c: continue
+                rel, abs_p = find_file(p)
+                if not abs_p:
+                    abs_p = os.path.join(PROJECT_DIR, p.lstrip("/\\"))
+                    rel = os.path.relpath(abs_p, PROJECT_DIR).replace(os.sep, "/")
+                os.makedirs(os.path.dirname(abs_p) or PROJECT_DIR, exist_ok=True)
+                backup_file(abs_p)
+                with open(abs_p, "w", encoding="utf-8") as f:
+                    f.write(c)
+                updated.append(rel)
+                open_in_vscode(abs_p, 1)
+            self._json(200, {"bridge": "ai-bridge", "success": True, "updated": len(updated), "files": updated})
+
+        elif path_only == "/terminal":
+            cmd = body.get("command", "").strip()
+            try:
+                subprocess.Popen(["code", PROJECT_DIR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+            self._json(200, {"bridge": "ai-bridge", "success": True, "command": cmd})
+
+def main():
+    server = BridgeServer(("127.0.0.1", PORT), Handler)
+    print(f"\n==========================================")
+    print(f" [OK] AI Bridge Connected: {PROJECT_NAME}")
+    print(f" [OK] Port: http://127.0.0.1:{PORT}")
+    print(f"==========================================\n")
+    server.serve_forever()
+
+if __name__ == "__main__":
+    main()
+
+```
+
 # components\BridgeRelayStudio.tsx
 
 ```tsx
-'use client';
-
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  ArrowLeft,
-  Check,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Plus,
-  RefreshCw,
-  Rss,
-  Send,
-  Settings,
-  Sliders,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
-import {
-  BridgeFeedSource,
-  BridgeFormat,
-  computeDeterministicHash,
-  DashboardEnvVar,
-  evaluateFilterRules,
-  FilterRulesConfig,
-  FormattingConfig,
-  getEnvValue,
-  INITIAL_BRIDGE_FEEDS,
-  INITIAL_DASHBOARD_ENV_VARS,
-  INITIAL_NORMALIZED_ITEMS,
-  INITIAL_SEEN_STATE,
-  InitialRunPolicy,
-  NormalizedFeedItem,
-  renderFormattedPreview,
-  resolveEnvVariablesInString,
-  SeenEntry,
-  TruncationStrategy,
-} from '@/lib/pipeline-engine';
-import type { PublishStepTrace } from '@/app/api/pipeline/publish/route';
-
-export type IftttViewMode =
-  | 'edit_trigger'
-  | 'choose_action'
-  | 'edit_action'
-  | 'applet_home'
-  | 'connections';
-
-export type SocialActionType = 'text' | 'link' | 'image' | 'video' | 'carousel';
-
-interface ActionCardDefinition {
-  id: SocialActionType;
-  title: string;
-  threadsDescription: string;
-  mastodonDescription: string;
-  defaultTemplate: string;
-}
-
-const ACTION_CARDS: ActionCardDefinition[] = [
-  {
-    id: 'text',
-    title: 'Create a text post',
-    threadsDescription: 'This action will create a text post on Threads.',
-    mastodonDescription: 'This action will create a text post on Mastodon.',
-    defaultTemplate: '{title}\n\n{summary}\n\n{tags}',
-  },
-  {
-    id: 'link',
-    title: 'Create a link post',
-    threadsDescription: 'This action will create a link post on Threads.',
-    mastodonDescription: 'This action will create a link post on Mastodon.',
-    defaultTemplate: '{title}\n\n{summary}\n\n{link}{UTM_SUFFIX}',
-  },
-  {
-    id: 'image',
-    title: 'Create an image post',
-    threadsDescription: 'This action will create an image post on Threads.',
-    mastodonDescription: 'This action will create an image post on Mastodon.',
-    defaultTemplate: '{title}\n\n{link}\n{tags}',
-  },
-  {
-    id: 'video',
-    title: 'Create a video post',
-    threadsDescription: 'This action will create a video post on Threads.',
-    mastodonDescription: 'This action will create a video post on Mastodon.',
-    defaultTemplate: '{title} — Watch via {source}\n\n{link}\n{tags}',
-  },
-  {
-    id: 'carousel',
-    title: 'Create a carousel (multiple media) post',
-    threadsDescription:
-      'This action will create a carousel (multiple media) post on Threads. At least two items are required in the carousel.',
-    mastodonDescription:
-      'This action will create a multi-image carousel post on Mastodon (up to 4 media attachments).',
-    defaultTemplate: '{title}\n\n{summary}\n\n{link}\n{tags}',
-  },
-];
-
-const QUICK_BRIDGE_EXAMPLES = [
-  {
-    label: 'TikTok Bridge (By user)',
-    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom',
-  },
-  {
-    label: 'GitHub Releases Bridge',
-    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=GithubReleaseBridge&user=RSS-Bridge&repo=rss-bridge&format=Json',
-  },
-  {
-    label: 'Instagram User Bridge',
-    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=InstagramBridge&context=Username&u=natgeo&media_type=all&format=Atom',
-  },
-  {
-    label: 'YouTube Channel Bridge',
-    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=YoutubeBridge&context=By+username&u=fireship&format=Mrss',
-  },
-  {
-    label: 'Hacker News Bridge',
-    url: 'https://rss-bridge.org/bridge01/?action=display&bridge=HackerNewsBridge&area=newest&min_score=150&format=Atom',
-  },
-];
-
-const STORAGE_KEY_ENV = 'bridgerelay_ifttt_env_v2';
-const STORAGE_KEY_TRIGGER_URL = 'bridgerelay_ifttt_trigger_url_v2';
-
-export default function BridgeRelayStudio() {
-  // Primary screen switcher: starts showing both the Orange Trigger and Dark Threads Action cards or switching between them
-  const [viewMode, setViewMode] = useState<IftttViewMode>('choose_action');
-  const [activeServiceTab, setActiveServiceTab] = useState<'threads' | 'mastodon' | 'both'>(
-    'threads'
-  );
-
-  // Trigger State (matching the Orange "Edit trigger" screenshot)
-  const [triggerFeedUrl, setTriggerFeedUrl] = useState<string>(
-    'https://rss-bridge.org/bridge01/?action=display&bridge=TikTokBridge&context=By+user&username=funnykittenstok&format=Atom'
-  );
-  const [showUrlHelper, setShowUrlHelper] = useState<boolean>(false);
-  const [initialRunPolicy, setInitialRunPolicy] = useState<InitialRunPolicy>('seed_only');
-  const [pollIntervalMinutes, setPollIntervalMinutes] = useState<number>(15);
-
-  // Selected Action State (matching the Dark "Threads" screenshot)
-  const [selectedActionType, setSelectedActionType] = useState<SocialActionType>('image');
-  const [actionLinkUrl, setActionLinkUrl] = useState<string>('{link}');
-  const [actionMediaUrl, setActionMediaUrl] = useState<string>(
-    'https://rss-bridge.org/static/release-2026-10-arch.png'
-  );
-  const [actionCarouselUrls, setActionCarouselUrls] = useState<string>(
-    'https://rss-bridge.org/static/slide-1.jpg, https://rss-bridge.org/static/slide-2.jpg'
-  );
-
-  // In-Dashboard Environment Variables & Credentials
-  const [envVars, setEnvVars] = useState<DashboardEnvVar[]>(INITIAL_DASHBOARD_ENV_VARS);
-  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
-  const [newVarKey, setNewVarKey] = useState<string>('');
-  const [newVarValue, setNewVarValue] = useState<string>('');
-  const [statusBanner, setStatusBanner] = useState<string>('');
-
-  // Feeds, Items & Deduplication State
-  const [feeds, setFeeds] = useState<BridgeFeedSource[]>(INITIAL_BRIDGE_FEEDS);
-  const [items, setItems] = useState<NormalizedFeedItem[]>(INITIAL_NORMALIZED_ITEMS);
-  const [selectedItemGuid, setSelectedItemGuid] = useState<string>(
-    INITIAL_NORMALIZED_ITEMS[0].guid
-  );
-  const [seenLedger, setSeenLedger] = useState<SeenEntry[]>(INITIAL_SEEN_STATE);
-  const [isPolling, setIsPolling] = useState<boolean>(false);
-  const [isPublishing, setIsPublishing] = useState<boolean>(false);
-
-  // Filter & Formatting Rules
-  const [filterRules, setFilterRules] = useState<FilterRulesConfig>({
-    keywordWhitelist: [],
-    keywordBlacklist: ['sponsored', 'webinar'],
-    regexPattern: '',
-    regexInvert: false,
-    authorWhitelist: [],
-    minContentLength: 20,
-    maxContentLength: 4000,
-    requireMediaAttachment: false,
-    stripHtmlPreserveBreaks: true,
-    extractInlineImages: true,
-  });
-
-  const [formatting, setFormatting] = useState<FormattingConfig>({
-    template: '{title}\n\n{summary}\n\n{link}\n{tags}',
-    mastodonMaxChars: 500,
-    threadsMaxChars: 500,
-    mastodonCountUrlAs23Chars: true,
-    truncationStrategy: 'ellipsis',
-    includeMediaAttachment: true,
-    defaultHashtags: ['RSSBridge'],
-    mastodonVisibility: 'public',
-  });
-
-  const [publishTraces, setPublishTraces] = useState<PublishStepTrace[]>([]);
-
-  // Load persisted trigger URL & env vars
-  useEffect(() => {
-    try {
-      const savedEnv = localStorage.getItem(STORAGE_KEY_ENV);
-      if (savedEnv) {
-        const parsed = JSON.parse(savedEnv);
-        if (Array.isArray(parsed) && parsed.length > 0) setEnvVars(parsed);
-      }
-      const savedUrl = localStorage.getItem(STORAGE_KEY_TRIGGER_URL);
-      if (savedUrl) setTriggerFeedUrl(savedUrl);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const updateAndSaveEnvVars = (updater: (prev: DashboardEnvVar[]) => DashboardEnvVar[]) => {
-    setEnvVars((prev) => {
-      const next = updater(prev);
-      try {
-        localStorage.setItem(STORAGE_KEY_ENV, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-    setStatusBanner('Saved in dashboard environment variables');
-    setTimeout(() => setStatusBanner(''), 2500);
-  };
-
-  const selectedItem = useMemo(() => {
-    return items.find((i) => i.guid === selectedItemGuid) || items[0];
-  }, [items, selectedItemGuid]);
-
-  const mastodonPreview = useMemo(() => {
-    if (!selectedItem) return null;
-    return renderFormattedPreview(selectedItem, formatting, 'mastodon', envVars);
-  }, [selectedItem, formatting, envVars]);
-
-  const threadsPreview = useMemo(() => {
-    if (!selectedItem) return null;
-    return renderFormattedPreview(selectedItem, formatting, 'threads', envVars);
-  }, [selectedItem, formatting, envVars]);
-
-  const currentActionDefinition = useMemo(() => {
-    return ACTION_CARDS.find((c) => c.id === selectedActionType) || ACTION_CARDS[0];
-  }, [selectedActionType]);
-
-  // Handlers
-  const handleUpdateTrigger = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      localStorage.setItem(STORAGE_KEY_TRIGGER_URL, triggerFeedUrl);
-    } catch {
-      // ignore
-    }
-
-    setIsPolling(true);
-    const resolvedUrl = resolveEnvVariablesInString(triggerFeedUrl, envVars);
-    setStatusBanner(`Updating trigger & polling ${resolvedUrl}...`);
-
-    try {
-      const res = await fetch('/api/pipeline/poll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          feedId: 'ifttt-active-trigger',
-          feedName: 'RSS-Bridge Trigger',
-          bridgeUrl: resolvedUrl,
-        }),
-      });
-      const data = await res.json();
-      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-        const incoming: NormalizedFeedItem[] = data.items;
-        setItems((prev) => {
-          const existing = new Set(prev.map((i) => i.guid));
-          const fresh = incoming.filter((i) => !existing.has(i.guid));
-          return [...fresh, ...prev];
-        });
-        setSelectedItemGuid(incoming[0].guid);
-      }
-      setStatusBanner('Trigger updated! Now choose your Threads / Mastodon action.');
-      setViewMode('choose_action');
-    } catch {
-      setStatusBanner('Trigger URL saved.');
-      setViewMode('choose_action');
-    } finally {
-      setIsPolling(false);
-    }
-  };
-
-  const handleSelectActionCard = (card: ActionCardDefinition) => {
-    setSelectedActionType(card.id);
-    setFormatting((prev) => ({
-      ...prev,
-      template: card.defaultTemplate,
-    }));
-    setViewMode('edit_action');
-  };
-
-  const handleInsertIngredient = (token: string) => {
-    setFormatting((prev) => ({
-      ...prev,
-      template: `${prev.template}${
-        prev.template.endsWith('\n') || prev.template.endsWith(' ') ? '' : ' '
-      }${token}`,
-    }));
-  };
-
-  const handleRunAppletNow = async () => {
-    if (!selectedItem || !mastodonPreview || !threadsPreview) return;
-    setIsPublishing(true);
-
-    const platforms: ('mastodon' | 'threads')[] =
-      activeServiceTab === 'both'
-        ? ['threads', 'mastodon']
-        : activeServiceTab === 'mastodon'
-          ? ['mastodon']
-          : ['threads'];
-
-    const mediaUrls =
-      selectedActionType === 'carousel'
-        ? actionCarouselUrls
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : selectedItem.enclosures.length > 0
-          ? selectedItem.enclosures.map((e) => e.url)
-          : [actionMediaUrl];
-
-    try {
-      const res = await fetch('/api/pipeline/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platforms,
-          actionType: selectedActionType,
-          mastodonPosts: mastodonPreview.posts,
-          threadsPosts: threadsPreview.posts,
-          linkUrl: resolveEnvVariablesInString(
-            actionLinkUrl.replace('{link}', selectedItem.link),
-            envVars
-          ),
-          mediaUrls,
-          visibility: formatting.mastodonVisibility,
-          dryRun: false,
-          credentials: {
-            mastodonInstanceUrl: getEnvValue(
-              envVars,
-              'MASTODON_INSTANCE_URL',
-              'https://mastodon.social'
-            ),
-            mastodonAccessToken: getEnvValue(envVars, 'MASTODON_ACCESS_TOKEN', ''),
-            threadsUserId: getEnvValue(envVars, 'THREADS_USER_ID', ''),
-            threadsAccessToken: getEnvValue(envVars, 'THREADS_ACCESS_TOKEN', ''),
-          },
-        }),
-      });
-      const data = await res.json();
-      if (data.traces && Array.isArray(data.traces)) {
-        setPublishTraces(data.traces);
-        setSeenLedger((prev) => [
-          {
-            guid: selectedItem.guid,
-            hashId: selectedItem.hashId,
-            feedId: selectedItem.feedId,
-            title: selectedItem.title,
-            status:
-              platforms.length === 2
-                ? 'published_both'
-                : platforms[0] === 'mastodon'
-                  ? 'published_mastodon'
-                  : 'published_threads',
-            reason: `Published via "${currentActionDefinition.title}" (${data.traces.length} API steps)`,
-            processedAt: new Date().toISOString(),
-          },
-          ...prev.filter((s) => s.guid !== selectedItem.guid),
-        ]);
-        setStatusBanner(
-          `Executed "${currentActionDefinition.title}" on ${platforms.join(' & ')}!`
-        );
-        setViewMode('applet_home');
-      }
-    } finally {
-      setIsPublishing(false);
-    }
-  };
-
-  const handleAddEnvVar = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanedKey = newVarKey
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9_]/g, '_');
-    if (!cleanedKey) return;
-    updateAndSaveEnvVars((prev) => [
-      ...prev.filter((item) => item.key !== cleanedKey),
-      {
-        id: `env-${Date.now()}`,
-        key: cleanedKey,
-        value: newVarValue,
-        description: `Custom IFTTT ingredient {${cleanedKey}}`,
-        isSecret: false,
-        category: 'template',
-      },
-    ]);
-    setNewVarKey('');
-    setNewVarValue('');
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col bg-white text-[#191919]">
-      {/* Top Bar Contract: 1-row, 3-zone header separated by gap-8 */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 lg:px-10 py-4 bg-white border-b border-slate-200">
-        {/* Zone 1: Brand wordmark */}
-        <a
-          href="#top"
-          onClick={(e) => {
-            e.preventDefault();
-            setViewMode('applet_home');
-          }}
-          className="text-xl font-extrabold tracking-tight text-[#191919] whitespace-nowrap shrink-0"
-          style={{ fontFamily: 'var(--font-display), sans-serif' }}
-        >
-          BridgeRelay
-        </a>
-
-        {/* Zone 2: 5 single-line navigation links */}
-        <nav className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600">
-          <button
-            type="button"
-            onClick={() => setViewMode('edit_trigger')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'edit_trigger'
-                ? 'border-[#EA7600] text-[#EA7600]'
-                : 'border-transparent hover:text-black'
-            }`}
-          >
-            Edit Trigger (RSS)
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('choose_action')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'choose_action'
-                ? 'border-black text-black'
-                : 'border-transparent hover:text-black'
-            }`}
-          >
-            Threads & Mastodon Actions
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('edit_action')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'edit_action'
-                ? 'border-black text-black'
-                : 'border-transparent hover:text-black'
-            }`}
-          >
-            Configure Post Ingredients
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('applet_home')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'applet_home'
-                ? 'border-black text-black'
-                : 'border-transparent hover:text-black'
-            }`}
-          >
-            If-This-Then-That Applet
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('connections')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              viewMode === 'connections'
-                ? 'border-black text-black'
-                : 'border-transparent hover:text-black'
-            }`}
-          >
-            Dashboard Variables ({envVars.length})
-          </button>
-        </nav>
-
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={handleRunAppletNow}
-            disabled={isPublishing}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-extrabold text-white bg-[#191919] rounded-full hover:bg-neutral-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>{isPublishing ? 'Publishing...' : 'Run Applet Now'}</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Mobile Switcher */}
-      <div className="flex md:hidden items-center gap-1.5 px-4 py-2.5 bg-slate-100 border-b border-slate-200 overflow-x-auto">
-        {(
-          [
-            ['edit_trigger', '1. Edit Trigger'],
-            ['choose_action', '2. Choose Action'],
-            ['edit_action', '3. Edit Action'],
-            ['applet_home', '4. Applet'],
-            ['connections', '5. Variables'],
-          ] as [IftttViewMode, string][]
-        ).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setViewMode(mode)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-full whitespace-nowrap shrink-0 ${
-              viewMode === mode ? 'bg-black text-white' : 'text-slate-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Status Toast Banner if active */}
-      {statusBanner && (
-        <div className="bg-emerald-900 text-white text-xs font-semibold text-center py-2.5 px-4">
-          {statusBanner}
-        </div>
-      )}
-
-      {/* =====================================================================
-          VIEW 1: ORANGE "EDIT TRIGGER" SCREEN (Matches image_73873339.png)
-         ===================================================================== */}
-      {viewMode === 'edit_trigger' && (
-        <div className="flex-1 bg-[#E56B00] text-white flex flex-col items-center justify-center px-6 py-14">
-          <div className="w-full max-w-xl mx-auto flex flex-col items-center">
-            {/* Top Back & Help Row */}
-            <div className="w-full flex items-center justify-between mb-4">
-              <button
-                type="button"
-                onClick={() => setViewMode('applet_home')}
-                className="inline-flex items-center gap-1.5 text-sm font-bold text-white/90 hover:text-white"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('connections')}
-                className="text-xs font-bold underline text-white/90 hover:text-white"
-              >
-                Use {'{RSS_BRIDGE_BASE_URL}'} variable
-              </button>
-            </div>
-
-            {/* Title: Edit trigger */}
-            <h1
-              className="text-4xl sm:text-5xl font-extrabold tracking-tight text-center mb-10"
-              style={{ fontFamily: 'var(--font-display), sans-serif' }}
-            >
-              Edit trigger
-            </h1>
-
-            {/* Giant White RSS Icon */}
-            <div className="mb-8 flex items-center justify-center">
-              <Rss className="w-28 h-28 text-white stroke-[2.75]" />
-            </div>
-
-            {/* Subtitle: New feed item */}
-            <h2
-              className="text-2xl sm:text-3xl font-extrabold text-center mb-10"
-              style={{ fontFamily: 'var(--font-display), sans-serif' }}
-            >
-              New feed item
-            </h2>
-
-            {/* Feed URL Form matching screenshot */}
-            <form onSubmit={handleUpdateTrigger} className="w-full space-y-6">
-              <div>
-                <label className="block text-base font-extrabold text-white mb-2">
-                  Feed URL
-                </label>
-                <textarea
-                  rows={4}
-                  required
-                  value={triggerFeedUrl}
-                  onChange={(e) => setTriggerFeedUrl(e.target.value)}
-                  className="w-full bg-white text-[#191919] rounded-2xl p-5 text-base sm:text-lg font-medium leading-snug focus:outline-none shadow-sm resize-none"
-                />
-                <div className="mt-2.5 text-xs sm:text-sm font-semibold text-white/95">
-                  for feed URL requirements,{' '}
-                  <button
-                    type="button"
-                    onClick={() => setShowUrlHelper((v) => !v)}
-                    className="underline font-bold hover:text-white"
-                  >
-                    visit the help page
-                  </button>
-                </div>
-              </div>
-
-              {/* Interactive RSS-Bridge Quick Presets Drawer when "visit the help page" is clicked */}
-              {showUrlHelper && (
-                <div className="bg-black/20 rounded-2xl p-5 space-y-3 text-left">
-                  <div className="text-xs font-bold text-white">
-                    Click any RSS-Bridge URL preset below to load it into Feed URL:
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {QUICK_BRIDGE_EXAMPLES.map((ex) => (
-                      <button
-                        key={ex.label}
-                        type="button"
-                        onClick={() => setTriggerFeedUrl(ex.url)}
-                        className="px-3 py-1.5 text-xs font-bold bg-white text-[#191919] rounded-lg hover:bg-slate-100 transition-colors"
-                      >
-                        {ex.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-white/20 text-xs">
-                    <div>
-                      <label className="block font-bold mb-1">Initial Run Policy</label>
-                      <select
-                        value={initialRunPolicy}
-                        onChange={(e) =>
-                          setInitialRunPolicy(e.target.value as InitialRunPolicy)
-                        }
-                        className="w-full px-3 py-2 rounded-lg bg-white text-black font-semibold"
-                      >
-                        <option value="seed_only">
-                          Mark current items seen (No initial spam)
-                        </option>
-                        <option value="publish_latest_one">Publish latest 1 item only</option>
-                        <option value="publish_all">Publish all items</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block font-bold mb-1">Polling Interval</label>
-                      <select
-                        value={pollIntervalMinutes}
-                        onChange={(e) => setPollIntervalMinutes(Number(e.target.value))}
-                        className="w-full px-3 py-2 rounded-lg bg-white text-black font-semibold"
-                      >
-                        <option value={15}>Every 15 minutes</option>
-                        <option value={30}>Every 30 minutes</option>
-                        <option value={60}>Every 60 minutes</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Big White Pill "Update trigger" Button */}
-              <div className="pt-4 flex justify-center">
-                <button
-                  type="submit"
-                  disabled={isPolling}
-                  className="bg-white text-[#191919] font-extrabold text-xl sm:text-2xl px-14 py-5 rounded-full hover:bg-neutral-100 transition-transform active:scale-95 shadow-md"
-                  style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                >
-                  {isPolling ? 'Checking Feed...' : 'Update trigger'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          VIEW 2: DARK "THREADS" / "MASTODON" 6-CARD ACTION GRID (Matches image_5b88e67e.png)
-         ===================================================================== */}
-      {viewMode === 'choose_action' && (
-        <div className="flex-1 flex flex-col bg-white">
-          {/* Deep Charcoal Top Banner matching image_5b88e67e.png */}
-          <div className="bg-[#191919] text-white pt-10 pb-12 px-6 flex flex-col items-center justify-center relative">
-            {/* Top Service Selector inside banner: Threads | Mastodon | Cross-Post Both */}
-            <div className="flex items-center gap-2 bg-white/10 p-1 rounded-full mb-8">
-              <button
-                type="button"
-                onClick={() => setActiveServiceTab('threads')}
-                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${
-                  activeServiceTab === 'threads'
-                    ? 'bg-white text-[#191919]'
-                    : 'text-white/80 hover:text-white'
-                }`}
-              >
-                Threads
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveServiceTab('mastodon')}
-                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${
-                  activeServiceTab === 'mastodon'
-                    ? 'bg-white text-[#191919]'
-                    : 'text-white/80 hover:text-white'
-                }`}
-              >
-                Mastodon
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveServiceTab('both')}
-                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors ${
-                  activeServiceTab === 'both'
-                    ? 'bg-white text-[#191919]'
-                    : 'text-white/80 hover:text-white'
-                }`}
-              >
-                Both (Threads + Mastodon)
-              </button>
-            </div>
-
-            {/* Iconic Center Logo */}
-            <div className="w-20 h-20 rounded-full flex items-center justify-center mb-5 text-5xl font-extrabold select-none border-4 border-white">
-              {activeServiceTab === 'mastodon' ? 'M' : '@'}
-            </div>
-
-            {/* Service Name */}
-            <h1
-              className="text-3xl sm:text-4xl font-extrabold tracking-tight"
-              style={{ fontFamily: 'var(--font-display), sans-serif' }}
-            >
-              {activeServiceTab === 'threads'
-                ? 'Threads'
-                : activeServiceTab === 'mastodon'
-                  ? 'Mastodon'
-                  : 'Threads + Mastodon'}
-            </h1>
-
-            {/* Active Trigger Indicator Pill */}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-white/80">
-              <span>
-                Trigger: <strong className="text-white">RSS New feed item</strong>
-              </span>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={() => setViewMode('edit_trigger')}
-                className="underline font-bold text-white hover:text-[#EA7600]"
-              >
-                Edit RSS-Bridge URL
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={() => setViewMode('connections')}
-                className="underline font-bold text-white hover:text-emerald-300"
-              >
-                Configure API Tokens in Dashboard
-              </button>
-            </div>
-          </div>
-
-          {/* 3x2 Action Cards Grid matching image_5b88e67e.png */}
-          <div className="max-w-6xl w-full mx-auto px-6 py-12">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {ACTION_CARDS.map((card) => {
-                const isCurrent = selectedActionType === card.id;
-                const desc =
-                  activeServiceTab === 'mastodon'
-                    ? card.mastodonDescription
-                    : card.threadsDescription;
-
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => handleSelectActionCard(card)}
-                    className={`bg-[#191919] text-white rounded-[24px] p-8 flex flex-col justify-between min-h-[220px] text-left transition-transform hover:-translate-y-0.5 hover:bg-neutral-900 focus:outline-none ${
-                      isCurrent ? 'ring-4 ring-[#EA7600]' : ''
-                    }`}
-                  >
-                    <div className="space-y-3">
-                      <h2
-                        className="text-2xl font-extrabold leading-tight text-white"
-                        style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                      >
-                        {card.title}
-                      </h2>
-                      <p className="text-sm sm:text-base text-white/90 leading-relaxed font-medium">
-                        {desc}
-                      </p>
-                    </div>
-
-                    <div className="pt-6 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-white/60">
-                        {isCurrent ? 'Selected Action · Click to edit' : 'Click to configure'}
-                      </span>
-                      <span className="bg-white text-[#191919] text-xs font-extrabold px-2.5 py-1 rounded-md">
-                        Pro
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-
-              {/* 6th Card: "+ Suggest a new action" / Custom Filter & Variables Card matching image_5b88e67e.png */}
-              <button
-                type="button"
-                onClick={() => setViewMode('connections')}
-                className="bg-white border-2 border-slate-200 rounded-[24px] p-8 flex flex-col items-center justify-center min-h-[220px] text-center hover:border-slate-400 transition-colors"
-              >
-                <Plus className="w-10 h-10 text-[#191919] stroke-[2.5] mb-3" />
-                <span
-                  className="text-2xl font-extrabold text-[#191919]"
-                  style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                >
-                  Suggest a new action
-                </span>
-                <span className="text-xs font-semibold text-slate-500 mt-1.5">
-                  Or configure custom dashboard environment variables & tokens
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          VIEW 3: DARK IFTTT "EDIT ACTION" INGREDIENT SCREEN
-         ===================================================================== */}
-      {viewMode === 'edit_action' && (
-        <div className="flex-1 bg-[#191919] text-white flex flex-col items-center px-6 py-12">
-          <div className="w-full max-w-2xl mx-auto space-y-8">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setViewMode('choose_action')}
-                className="inline-flex items-center gap-1.5 text-sm font-bold text-white/80 hover:text-white"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back to actions</span>
-              </button>
-              <span className="text-xs font-mono text-white/70">
-                Target: {activeServiceTab.toUpperCase()}
-              </span>
-            </div>
-
-            <div className="text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full border-4 border-white flex items-center justify-center text-3xl font-extrabold">
-                {activeServiceTab === 'mastodon' ? 'M' : '@'}
-              </div>
-              <h1
-                className="text-3xl sm:text-4xl font-extrabold"
-                style={{ fontFamily: 'var(--font-display), sans-serif' }}
-              >
-                {currentActionDefinition.title}
-              </h1>
-              <p className="text-sm text-white/80 max-w-md mx-auto">
-                {activeServiceTab === 'mastodon'
-                  ? currentActionDefinition.mastodonDescription
-                  : currentActionDefinition.threadsDescription}
-              </p>
-            </div>
-
-            {/* Action Fields with "+ Add ingredient" buttons */}
-            <div className="space-y-6 bg-white/5 border border-white/15 rounded-3xl p-6 sm:p-8">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-base font-extrabold text-white">
-                    Post Text / Caption
-                  </label>
-                  <span className="text-xs font-mono tabular-nums text-white/80">
-                    {threadsPreview?.effectiveCharCounts[0] ?? 0} / 500 chars
-                  </span>
-                </div>
-                <textarea
-                  rows={4}
-                  value={formatting.template}
-                  onChange={(e) =>
-                    setFormatting((prev) => ({ ...prev, template: e.target.value }))
-                  }
-                  className="w-full bg-white text-[#191919] rounded-2xl p-4 text-sm sm:text-base font-medium focus:outline-none"
-                />
-
-                {/* IFTTT "+ Add ingredient" Bar */}
-                <div className="mt-3 space-y-2">
-                  <div className="text-xs font-bold text-white/80">
-                    + Add RSS-Bridge Ingredient or Dashboard Variable:
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      ['{title}', 'EntryTitle'],
-                      ['{link}', 'EntryUrl'],
-                      ['{summary}', 'EntryContent'],
-                      ['{author}', 'EntryAuthor'],
-                      ['{tags}', 'Hashtags'],
-                      ['{source}', 'FeedTitle'],
-                    ].map(([tok, label]) => (
-                      <button
-                        key={tok}
-                        type="button"
-                        onClick={() => handleInsertIngredient(tok)}
-                        className="px-3 py-1.5 text-xs font-bold bg-white text-[#191919] rounded-full hover:bg-slate-200 transition-colors"
-                      >
-                        + {label}
-                      </button>
-                    ))}
-                    {envVars
-                      .filter((v) => !v.isSecret)
-                      .map((v) => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => handleInsertIngredient(`{${v.key}}`)}
-                          className="px-3 py-1.5 text-xs font-bold bg-[#EA7600] text-white rounded-full hover:opacity-90 transition-opacity"
-                        >
-                          + {v.key}
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Conditional Fields based on selectedActionType */}
-              {selectedActionType === 'link' && (
-                <div>
-                  <label className="block text-base font-extrabold text-white mb-2">
-                    Link URL
-                  </label>
-                  <input
-                    type="text"
-                    value={actionLinkUrl}
-                    onChange={(e) => setActionLinkUrl(e.target.value)}
-                    className="w-full bg-white text-[#191919] rounded-xl px-4 py-3 text-sm font-mono"
-                  />
-                </div>
-              )}
-
-              {(selectedActionType === 'image' || selectedActionType === 'video') && (
-                <div>
-                  <label className="block text-base font-extrabold text-white mb-2">
-                    {selectedActionType === 'video' ? 'Video URL' : 'Image URL'} (auto-uses feed
-                    enclosure if present)
-                  </label>
-                  <input
-                    type="text"
-                    value={actionMediaUrl}
-                    onChange={(e) => setActionMediaUrl(e.target.value)}
-                    className="w-full bg-white text-[#191919] rounded-xl px-4 py-3 text-sm font-mono"
-                  />
-                </div>
-              )}
-
-              {selectedActionType === 'carousel' && (
-                <div>
-                  <label className="block text-base font-extrabold text-white mb-2">
-                    Carousel Media URLs (comma-separated, minimum 2 items)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={actionCarouselUrls}
-                    onChange={(e) => setActionCarouselUrls(e.target.value)}
-                    className="w-full bg-white text-[#191919] rounded-xl p-3 text-xs font-mono"
-                  />
-                </div>
-              )}
-
-              {/* Live Rendered Preview Box */}
-              <div className="bg-black/40 border border-white/15 rounded-2xl p-4 space-y-2">
-                <div className="text-xs font-bold text-white/70">
-                  Live Rendered Post Preview (from current RSS-Bridge item):
-                </div>
-                <div className="text-sm text-white whitespace-pre-wrap leading-relaxed">
-                  {threadsPreview?.posts[0]}
-                </div>
-              </div>
-            </div>
-
-            {/* Big White Pill "Update action" Button */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-              <button
-                type="button"
-                onClick={() => setViewMode('applet_home')}
-                className="bg-white text-[#191919] font-extrabold text-xl px-12 py-4 rounded-full hover:bg-neutral-200 transition-transform active:scale-95"
-                style={{ fontFamily: 'var(--font-display), sans-serif' }}
-              >
-                Update action
-              </button>
-              <button
-                type="button"
-                onClick={handleRunAppletNow}
-                disabled={isPublishing}
-                className="bg-[#EA7600] text-white font-extrabold text-xl px-10 py-4 rounded-full hover:opacity-95 transition-transform active:scale-95"
-                style={{ fontFamily: 'var(--font-display), sans-serif' }}
-              >
-                {isPublishing ? 'Publishing...' : 'Save & Test Post Now'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          VIEW 4: IFTTT APPLET STACK ("If New feed item → Then Create post")
-         ===================================================================== */}
-      {viewMode === 'applet_home' && (
-        <div className="flex-1 max-w-4xl w-full mx-auto px-6 py-12 space-y-10">
-          <div className="text-center space-y-2">
-            <h1
-              className="text-3xl sm:text-4xl font-extrabold text-[#191919]"
-              style={{ fontFamily: 'var(--font-display), sans-serif' }}
-            >
-              If New feed item, then {currentActionDefinition.title}
-            </h1>
-            <p className="text-sm text-slate-600">
-              Click either the orange Trigger card or the dark Action card below to edit your IFTTT
-              workflow.
-            </p>
-          </div>
-
-          {/* Classic IFTTT Stacked Trigger -> Action Cards */}
-          <div className="space-y-4 max-w-2xl mx-auto">
-            {/* IF THIS CARD (Orange RSS) */}
-            <div className="bg-[#E56B00] text-white rounded-[28px] p-7 flex items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-center gap-5 min-w-0">
-                <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
-                  <Rss className="w-8 h-8 text-white stroke-[2.5]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-extrabold uppercase tracking-wider text-white/80">
-                    If This
-                  </div>
-                  <div
-                    className="text-2xl font-extrabold leading-tight"
-                    style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                  >
-                    New feed item
-                  </div>
-                  <div className="text-xs font-mono text-white/90 truncate mt-1">
-                    {triggerFeedUrl}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewMode('edit_trigger')}
-                className="px-5 py-2.5 bg-white text-[#191919] text-xs font-extrabold rounded-full hover:bg-slate-100 shrink-0"
-              >
-                Edit trigger
-              </button>
-            </div>
-
-            {/* Connector Line */}
-            <div className="flex justify-center">
-              <div className="w-1.5 h-8 bg-slate-300 rounded-full" />
-            </div>
-
-            {/* THEN THAT CARD (Dark Charcoal Threads / Mastodon) */}
-            <div className="bg-[#191919] text-white rounded-[28px] p-7 flex items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-center gap-5 min-w-0">
-                <div className="w-14 h-14 rounded-2xl border-2 border-white flex items-center justify-center text-2xl font-extrabold shrink-0">
-                  {activeServiceTab === 'mastodon' ? 'M' : '@'}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-extrabold uppercase tracking-wider text-white/70">
-                    Then That ({activeServiceTab})
-                  </div>
-                  <div
-                    className="text-2xl font-extrabold leading-tight"
-                    style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                  >
-                    {currentActionDefinition.title}
-                  </div>
-                  <div className="text-xs font-mono text-white/80 truncate mt-1">
-                    Template: {formatting.template.replace(/\n/g, ' ')}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('choose_action')}
-                  className="px-4 py-2.5 bg-white/15 text-white text-xs font-extrabold rounded-full hover:bg-white/25"
-                >
-                  Change action
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('edit_action')}
-                  className="px-5 py-2.5 bg-white text-[#191919] text-xs font-extrabold rounded-full hover:bg-slate-100"
-                >
-                  Edit action
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Check Now / Run Button */}
-          <div className="flex justify-center pt-2">
-            <button
-              type="button"
-              onClick={handleRunAppletNow}
-              disabled={isPublishing}
-              className="bg-[#191919] text-white font-extrabold text-lg px-12 py-4 rounded-full hover:bg-neutral-800 transition-transform active:scale-95"
-              style={{ fontFamily: 'var(--font-display), sans-serif' }}
-            >
-              {isPublishing ? 'Checking Feed & Publishing...' : 'Check now'}
-            </button>
-          </div>
-
-          {/* Latest API Execution Trace if run */}
-          {publishTraces.length > 0 && (
-            <div className="border border-slate-200 rounded-2xl p-6 space-y-4 bg-slate-50">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-[#191919]">
-                  Last Applet Execution Trace ({publishTraces.length} API Steps)
-                </h3>
-                <span className="text-xs text-emerald-700 font-bold">
-                  Completed · Deduplication GUID recorded
-                </span>
-              </div>
-              <div className="space-y-2">
-                {publishTraces.map((t) => (
-                  <div
-                    key={t.step}
-                    className="p-3 bg-white border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                  >
-                    <div>
-                      <span className="font-mono font-bold text-slate-900">
-                        Step #{t.step} ({t.platform})
-                      </span>{' '}
-                      · <span className="font-mono text-slate-600">{t.endpoint}</span>
-                    </div>
-                    <span className="font-mono font-bold text-emerald-700">
-                      HTTP {t.httpStatus} ({t.durationMs}ms)
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =====================================================================
-          VIEW 5: IN-DASHBOARD ENVIRONMENT VARIABLES & TOKENS SETUP
-         ===================================================================== */}
-      {viewMode === 'connections' && (
-        <div className="flex-1 max-w-5xl w-full mx-auto px-6 py-10 space-y-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
-            <div>
-              <h1
-                className="text-2xl sm:text-3xl font-extrabold text-[#191919]"
-                style={{ fontFamily: 'var(--font-display), sans-serif' }}
-              >
-                In-Dashboard Environment Variables & Account Tokens
-              </h1>
-              <p className="text-sm text-slate-600 mt-1">
-                Set up your Threads & Mastodon tokens and custom IFTTT variables right here inside
-                the website.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setViewMode('choose_action')}
-              className="px-5 py-2.5 bg-[#191919] text-white text-xs font-extrabold rounded-full hover:bg-neutral-800 self-start"
-            >
-              Done · Return to Actions
-            </button>
-          </div>
-
-          <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
-                  <th className="py-3.5 px-4">Variable Key</th>
-                  <th className="py-3.5 px-4">Value (Stored in Website Dashboard)</th>
-                  <th className="py-3.5 px-4">Description</th>
-                  <th className="py-3.5 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-xs">
-                {envVars.map((env) => {
-                  const isRevealed = Boolean(revealedSecrets[env.id]);
-                  return (
-                    <tr key={env.id} className="hover:bg-slate-50">
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                        {env.key}
-                      </td>
-                      <td className="py-3.5 px-4 min-w-[260px]">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type={env.isSecret && !isRevealed ? 'password' : 'text'}
-                            value={env.value}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              updateAndSaveEnvVars((prev) =>
-                                prev.map((item) =>
-                                  item.id === env.id ? { ...item, value: val } : item
-                                )
-                              );
-                            }}
-                            className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-black"
-                          />
-                          {env.isSecret && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRevealedSecrets((prev) => ({
-                                  ...prev,
-                                  [env.id]: !prev[env.id],
-                                }))
-                              }
-                              className="p-1.5 text-slate-500 hover:text-black"
-                            >
-                              {isRevealed ? (
-                                <EyeOff className="w-4 h-4" />
-                              ) : (
-                                <Eye className="w-4 h-4" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-600">{env.description}</td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateAndSaveEnvVars((prev) =>
-                              prev.filter((item) => item.id !== env.id)
-                            )
-                          }
-                          className="p-1.5 text-slate-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <form
-            onSubmit={handleAddEnvVar}
-            className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row items-end gap-4"
-          >
-            <div className="w-full sm:w-1/3">
-              <label className="block text-xs font-bold text-slate-800 mb-1">
-                New Variable Key
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. CUSTOM_TAG"
-                value={newVarKey}
-                onChange={(e) => setNewVarKey(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs font-mono bg-white border border-slate-300 rounded-xl"
-              />
-            </div>
-            <div className="w-full sm:flex-1">
-              <label className="block text-xs font-bold text-slate-800 mb-1">
-                Variable Value
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Value injected into triggers or post templates"
-                value={newVarValue}
-                onChange={(e) => setNewVarValue(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs font-mono bg-white border border-slate-300 rounded-xl"
-              />
-            </div>
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-[#191919] text-white text-xs font-extrabold rounded-full hover:bg-neutral-800 whitespace-nowrap shrink-0"
-            >
-              + Add Variable
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  );
-}
-
+app/
+  api/
+    cron/
+      route.ts
+    pipeline/
+      poll/
+        route.ts
+      publish/
+        route.ts
+      verify/
+        route.ts
+  page.tsx
+  layout.tsx
+  globals.css
+lib/
+  db.ts
+  pipeline-engine.ts
+  utils.ts
 ```
 
 # eslint.config.mjs
@@ -2468,6 +5656,71 @@ export async function publishThreadsTwoStep(text: string): Promise<{ id: string 
 `;
 }
 
+```
+
+# lib\db.ts
+
+```ts
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+export interface PersistentSeenRecord {
+  guidHash: string;
+  guid: string;
+  feedId: string;
+  title: string;
+  status: 'published' | 'seeded' | 'filtered_out';
+  publishedAt: string;
+  mastodonStatusId?: string;
+  threadsPostId?: string;
+}
+
+// In serverless/Vercel environments, root fs is read-only. We safely use os.tmpdir().
+const DATA_DIR =
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? path.join(os.tmpdir(), 'bridgerelay')
+    : path.join(process.cwd(), 'data');
+
+const DB_FILE = path.join(DATA_DIR, 'seen_ledger.json');
+
+function ensureStore(): Record<string, PersistentSeenRecord> {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_FILE)) {
+      fs.writeFileSync(DB_FILE, JSON.stringify({}), 'utf-8');
+      return {};
+    }
+    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+export function isItemSeen(guidHash: string): boolean {
+  const store = ensureStore();
+  return Boolean(store[guidHash]);
+}
+
+export function markItemSeen(record: PersistentSeenRecord): void {
+  try {
+    const store = ensureStore();
+    store[record.guidHash] = record;
+    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write to seen_ledger:', err);
+  }
+}
+
+export function getSeenRecords(): PersistentSeenRecord[] {
+  const store = ensureStore();
+  return Object.values(store).sort(
+    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+  );
+}
 ```
 
 # lib\pipeline-engine.ts
@@ -3191,13 +6444,12 @@ export const INITIAL_SEEN_STATE: SeenEntry[] = [
 # lib\utils.ts
 
 ```ts
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
-
 ```
 
 # metadata.json
@@ -3227,7 +6479,7 @@ export function cn(...inputs: ClassValue[]) {
 # next.config.ts
 
 ```ts
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -3237,33 +6489,17 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
-  // Allow access to remote image placeholder.
   images: {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'picsum.photos',
-        port: '',
-        pathname: '/**', // This allows any path under the hostname
+        hostname: '**',
       },
     ],
-  },
-  output: 'standalone',
-  transpilePackages: ['motion'],
-  webpack: (config, {dev}) => {
-    // HMR is disabled in AI Studio via DISABLE_HMR env var.
-    // Do not modify—file watching is disabled to prevent flickering during agent edits.
-    if (dev && process.env.DISABLE_HMR === 'true') {
-      config.watchOptions = {
-        ignored: /.*/,
-      };
-    }
-    return config;
   },
 };
 
 export default nextConfig;
-
 ```
 
 # package.json
@@ -3286,6 +6522,7 @@ export default nextConfig;
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.3",
     "lucide-react": "^0.553.0",
     "motion": "^12.23.24",
     "next": "^15.4.9",
@@ -3308,7 +6545,6 @@ export default nextConfig;
     "typescript": "5.9.3"
   }
 }
-
 ```
 
 # postcss.config.mjs
@@ -3318,12 +6554,10 @@ export default nextConfig;
 const config = {
   plugins: {
     '@tailwindcss/postcss': {},
-    autoprefixer: {},
   },
 };
 
 export default config;
-
 ```
 
 # public\assets\aistudio\image_5b88e67e.png
@@ -3393,5 +6627,11 @@ View your app in AI Studio: https://ai.studio/apps/50bf7c09-8613-4e5d-8900-94764
   "exclude": ["node_modules"]
 }
 
+```
+
+# Vercel\Next.js
+
+```js
+https://your-domain.vercel.app/api/cron
 ```
 

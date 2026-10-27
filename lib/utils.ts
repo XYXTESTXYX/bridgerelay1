@@ -1,3 +1,6 @@
-git add .
-git commit -m "Fix Vercel 404s, add serverless storage and real publishing"
-git push
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}

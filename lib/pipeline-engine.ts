@@ -4,6 +4,8 @@ export type InitialRunPolicy = 'seed_only' | 'publish_latest_one' | 'publish_all
 
 export type TruncationStrategy = 'ellipsis' | 'thread_split' | 'title_and_link_only';
 
+export type SocialActionType = 'text' | 'link' | 'image' | 'video' | 'carousel';
+
 export interface DashboardEnvVar {
   id: string;
   key: string;
@@ -11,29 +13,6 @@ export interface DashboardEnvVar {
   description: string;
   isSecret: boolean;
   category: 'rss_bridge' | 'mastodon' | 'threads' | 'template';
-}
-
-export interface IftttApplet {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: {
-    bridgePreset: string;
-    bridgeUrl: string;
-    format: BridgeFormat;
-    pollIntervalMinutes: number;
-    initialRunPolicy: InitialRunPolicy;
-  };
-  filter: FilterRulesConfig;
-  action: {
-    destinations: ('mastodon' | 'threads')[];
-    formatting: FormattingConfig;
-  };
-  stats: {
-    runsCount: number;
-    publishedCount: number;
-    lastRunAt: string | null;
-  };
 }
 
 export interface MediaEnclosure {
@@ -110,8 +89,7 @@ export interface SeenEntryRecord {
   reason?: string;
   processedAt: string;
   mastodonStatusId?: string;
-  threadsContainerId?: string;
-  threadsMediaId?: string;
+  threadsPostId?: string;
 }
 
 export type SeenEntry = SeenEntryRecord;
@@ -139,7 +117,7 @@ export const INITIAL_DASHBOARD_ENV_VARS: DashboardEnvVar[] = [
     id: 'env-1',
     key: 'RSS_BRIDGE_BASE_URL',
     value: 'https://rss-bridge.org/bridge01',
-    description: 'Base URL of your RSS-Bridge instance used in IFTTT Trigger URLs',
+    description: 'Base URL of your RSS-Bridge instance',
     isSecret: false,
     category: 'rss_bridge',
   },
@@ -147,56 +125,53 @@ export const INITIAL_DASHBOARD_ENV_VARS: DashboardEnvVar[] = [
     id: 'env-2',
     key: 'MASTODON_INSTANCE_URL',
     value: 'https://mastodon.social',
-    description: 'Target Mastodon server URL for status & media uploads',
+    description: 'Target Mastodon server URL',
     isSecret: false,
     category: 'mastodon',
   },
   {
     id: 'env-3',
     key: 'MASTODON_ACCESS_TOKEN',
-    value: 'masto_live_tok_98f21a4c7e3b109d',
-    description: 'Bearer token with write:statuses and write:media scopes',
+    value: '',
+    description: 'Mastodon bearer token with write:statuses and write:media scopes',
     isSecret: true,
     category: 'mastodon',
   },
   {
     id: 'env-4',
     key: 'THREADS_USER_ID',
-    value: '17841405829304918',
-    description: 'Meta Threads Graph API User ID for /{user-id}/threads container endpoint',
+    value: '',
+    description: 'Meta Threads User ID for /{user-id}/threads endpoint',
     isSecret: false,
     category: 'threads',
   },
   {
     id: 'env-5',
     key: 'THREADS_ACCESS_TOKEN',
-    value: 'THQVJ_long_lived_60d_token_849201a',
-    description: '60-day long-lived Meta Threads OAuth access token',
+    value: '',
+    description: 'Meta Threads OAuth access token',
     isSecret: true,
     category: 'threads',
   },
   {
     id: 'env-6',
     key: 'BRAND_SIGNATURE',
-    value: 'via BridgeRelay Automation',
-    description: 'Custom signature variable usable as {BRAND_SIGNATURE} in post templates',
+    value: 'via BridgeRelay',
+    description: 'Optional signature variable usable as {BRAND_SIGNATURE}',
     isSecret: false,
     category: 'template',
   },
   {
     id: 'env-7',
     key: 'UTM_SUFFIX',
-    value: '?utm_source=syndication&utm_medium=social',
-    description: 'Tracking suffix variable usable as {UTM_SUFFIX} in post templates',
+    value: '?utm_source=syndication',
+    description: 'Tracking suffix usable as {UTM_SUFFIX}',
     isSecret: false,
     category: 'template',
   },
 ];
 
-export function resolveEnvVariablesInString(
-  input: string,
-  envVars: DashboardEnvVar[]
-): string {
+export function resolveEnvVariablesInString(input: string, envVars: DashboardEnvVar[]): string {
   if (!input) return '';
   let output = input;
   for (const env of envVars) {
@@ -212,11 +187,7 @@ export function resolveEnvVariablesInString(
   return output;
 }
 
-export function getEnvValue(
-  envVars: DashboardEnvVar[],
-  key: string,
-  fallback = ''
-): string {
+export function getEnvValue(envVars: DashboardEnvVar[], key: string, fallback = ''): string {
   const found = envVars.find((e) => e.key === key);
   return found ? found.value : fallback;
 }
@@ -224,8 +195,8 @@ export function getEnvValue(
 export function computeDeterministicHash(input: string): string {
   let h1 = 0xdeadbeef ^ input.length;
   let h2 = 0x41c6ce57 ^ input.length;
-  for (let i = 0, ch; i < input.length; i++) {
-    ch = input.charCodeAt(i);
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
     h1 = Math.imul(h1 ^ ch, 2654435761);
     h2 = Math.imul(h2 ^ ch, 1597334677);
   }
@@ -448,7 +419,6 @@ export function renderFormattedPreview(
 
   const fullText = renderWithSummary(item.cleanSummary);
   const fullLen = computeEffectiveLength(fullText, platform, countUrlAs23);
-
   const mediaAttachments = formatting.includeMediaAttachment ? item.enclosures.slice(0, 4) : [];
 
   if (fullLen <= maxChars) {
@@ -495,10 +465,7 @@ export function renderFormattedPreview(
     }
 
     const footer = `\n\n${item.link}${formattedTags ? `\n${formattedTags}` : ''}`;
-    if (
-      computeEffectiveLength(currentChunk.trim() + footer, platform, countUrlAs23) <=
-      maxChars - 10
-    ) {
+    if (computeEffectiveLength(currentChunk.trim() + footer, platform, countUrlAs23) <= maxChars - 10) {
       chunks.push((currentChunk.trim() + footer).trim());
     } else {
       if (currentChunk.trim()) chunks.push(currentChunk.trim());
@@ -548,7 +515,7 @@ export function renderFormattedPreview(
 export const INITIAL_BRIDGE_FEEDS: BridgeFeedSource[] = [
   {
     id: 'feed-github-releases',
-    name: 'IF GitHub Release via RSS-Bridge → THEN Mastodon + Threads',
+    name: 'GitHub Releases Feed',
     bridgeUrl:
       '{RSS_BRIDGE_BASE_URL}/?action=display&bridge=GithubReleaseBridge&user=RSS-Bridge&repo=rss-bridge&format=Json',
     bridgeName: 'GithubReleaseBridge',
@@ -561,7 +528,7 @@ export const INITIAL_BRIDGE_FEEDS: BridgeFeedSource[] = [
   },
   {
     id: 'feed-hn-frontpage',
-    name: 'IF HackerNews Score > 150 → THEN Cross-Post Summary',
+    name: 'HackerNews Top Items',
     bridgeUrl:
       '{RSS_BRIDGE_BASE_URL}/?action=display&bridge=HackerNewsBridge&area=newest&min_score=150&format=Atom',
     bridgeName: 'HackerNewsBridge',
@@ -572,38 +539,23 @@ export const INITIAL_BRIDGE_FEEDS: BridgeFeedSource[] = [
     lastPolledAt: '2026-10-26T16:30:00Z',
     hasCompletedInitialRun: true,
   },
-  {
-    id: 'feed-fedi-engineering',
-    name: 'IF Mastodon Bridge Media Post → THEN Meta Threads Container',
-    bridgeUrl:
-      '{RSS_BRIDGE_BASE_URL}/?action=display&bridge=MastodonBridge&username=%40Gargron%40mastodon.social&format=Mrss',
-    bridgeName: 'MastodonBridge',
-    format: 'Mrss',
-    pollIntervalMinutes: 20,
-    initialRunPolicy: 'seed_only',
-    enabled: true,
-    lastPolledAt: null,
-    hasCompletedInitialRun: false,
-  },
 ];
 
 export const INITIAL_NORMALIZED_ITEMS: NormalizedFeedItem[] = [
   {
     guid: 'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-10-24',
-    hashId: computeDeterministicHash(
-      'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-10-24'
-    ),
+    hashId: computeDeterministicHash('https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-10-24'),
     feedId: 'feed-github-releases',
-    feedName: 'IF GitHub Release via RSS-Bridge → THEN Mastodon + Threads',
-    title: 'RSS-Bridge 2026-10 Release: Native JSON Attachment Normalizer & Rate-Limit Cache',
+    feedName: 'GitHub Releases Feed',
+    title: 'RSS-Bridge Release: Native JSON Attachment Normalizer & Rate-Limit Cache',
     rawHtml:
       '<p>This release introduces deterministic ETag caching across 42 bridges, stricter HTML sanitization for Atom and MRSS outputs, and native media enclosure extraction for multi-image posts.</p><img src="https://rss-bridge.org/static/release-2026-10-arch.png" alt="RSS-Bridge Cache Pipeline Diagram" />',
     cleanSummary:
-      'This release introduces deterministic ETag caching across 42 bridges, stricter HTML sanitization for Atom and MRSS outputs, and native media enclosure extraction for multi-image posts. Operators running high-frequency polling loops can now enable conditional HTTP 304 responses per bridge instance.',
+      'This release introduces deterministic ETag caching across 42 bridges, stricter HTML sanitization for Atom and MRSS outputs, and native media enclosure extraction for multi-image posts.',
     link: 'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-10-24',
     author: 'rss-bridge-maintainers',
     publishedAt: '2026-10-26T15:42:00Z',
-    tags: ['RSSBridge', 'OpenSource', 'Syndication', 'SelfHosted'],
+    tags: ['RSSBridge', 'OpenSource', 'Syndication'],
     enclosures: [
       {
         url: 'https://rss-bridge.org/static/release-2026-10-arch.png',
@@ -613,100 +565,6 @@ export const INITIAL_NORMALIZED_ITEMS: NormalizedFeedItem[] = [
       },
     ],
   },
-  {
-    guid: 'https://news.ycombinator.com/item?id=41982410',
-    hashId: computeDeterministicHash('https://news.ycombinator.com/item?id=41982410'),
-    feedId: 'feed-hn-frontpage',
-    feedName: 'IF HackerNews Score > 150 → THEN Cross-Post Summary',
-    title: 'SQLite WAL Mode Contention Benchmarks for High-Frequency Cron Collectors',
-    rawHtml:
-      '<p>An empirical breakdown of SQLite WAL journal concurrency when running 15-minute feed ingestion workers alongside web read replicas on a single NVMe VPS.</p>',
-    cleanSummary:
-      'An empirical breakdown of SQLite WAL journal concurrency when running 15-minute feed ingestion workers alongside web read replicas on a single NVMe VPS. Setting busy_timeout=5000 and synchronous=NORMAL eliminates lock errors up to 1,200 writes/sec.',
-    link: 'https://news.ycombinator.com/item?id=41982410',
-    author: 'k_systems',
-    publishedAt: '2026-10-26T16:10:00Z',
-    tags: ['SQLite', 'Databases', 'Architecture', 'Backend'],
-    enclosures: [],
-  },
-  {
-    guid: 'https://news.ycombinator.com/item?id=41981905',
-    hashId: computeDeterministicHash('https://news.ycombinator.com/item?id=41981905'),
-    feedId: 'feed-hn-frontpage',
-    feedName: 'IF HackerNews Score > 150 → THEN Cross-Post Summary',
-    title: 'Sponsored Webinar: Boost Enterprise Cloud Spend Efficiency by 10x Today',
-    rawHtml:
-      '<p>Sponsored post: Register now for our exclusive promotional webinar on enterprise cloud cost management and receive a free trial voucher.</p>',
-    cleanSummary:
-      'Sponsored post: Register now for our exclusive promotional webinar on enterprise cloud cost management and receive a free trial voucher.',
-    link: 'https://news.ycombinator.com/item?id=41981905',
-    author: 'promo_partner',
-    publishedAt: '2026-10-26T14:55:00Z',
-    tags: ['Sponsored', 'Cloud', 'Webinar'],
-    enclosures: [],
-  },
-  {
-    guid: 'https://mastodon.social/@Gargron/11339481029384',
-    hashId: computeDeterministicHash('https://mastodon.social/@Gargron/11339481029384'),
-    feedId: 'feed-fedi-engineering',
-    feedName: 'IF Mastodon Bridge Media Post → THEN Meta Threads Container',
-    title: 'Async Media Processing & Two-Step Container Upload Patterns in ActivityPub 2026',
-    rawHtml:
-      '<p>When cross-posting high-resolution enclosures to Mastodon (/api/v2/media) and Meta Threads (/{user-id}/threads), asynchronous media container polling prevents HTTP 422 timeouts on large images.</p>',
-    cleanSummary:
-      'When cross-posting high-resolution enclosures to Mastodon (/api/v2/media) and Meta Threads (/{user-id}/threads), asynchronous media container polling prevents HTTP 422 timeouts on large images. Always verify container status=FINISHED before invoking threads_publish.',
-    link: 'https://mastodon.social/@Gargron/11339481029384',
-    author: 'Gargron',
-    publishedAt: '2026-10-26T16:28:00Z',
-    tags: ['ActivityPub', 'Mastodon', 'ThreadsAPI', 'MediaPipeline'],
-    enclosures: [
-      {
-        url: 'https://files.mastodon.social/media_attachments/files/113/394/810/original/pipeline.png',
-        mimeType: 'image/png',
-        source: 'enclosure',
-        altText: 'Two-step media upload state machine diagram',
-      },
-    ],
-  },
-  {
-    guid: 'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-09-15',
-    hashId: computeDeterministicHash(
-      'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-09-15'
-    ),
-    feedId: 'feed-github-releases',
-    feedName: 'IF GitHub Release via RSS-Bridge → THEN Mastodon + Threads',
-    title: 'RSS-Bridge 2026-09 Release: Custom CSS Selector Bridge & XPath 2.0 Support',
-    rawHtml:
-      '<p>Added support for custom XPath 2.0 expressions in FilterBridge and improved character encoding normalization for non-UTF8 upstream sites.</p>',
-    cleanSummary:
-      'Added support for custom XPath 2.0 expressions in FilterBridge and improved character encoding normalization for non-UTF8 upstream sites.',
-    link: 'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-09-15',
-    author: 'rss-bridge-maintainers',
-    publishedAt: '2026-09-15T11:20:00Z',
-    tags: ['RSSBridge', 'XPath', 'Release'],
-    enclosures: [],
-  },
 ];
 
-export const INITIAL_SEEN_STATE: SeenEntry[] = [
-  {
-    guid: 'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-09-15',
-    hashId: computeDeterministicHash(
-      'https://github.com/RSS-Bridge/rss-bridge/releases/tag/2026-09-15'
-    ),
-    feedId: 'feed-github-releases',
-    title: 'RSS-Bridge 2026-09 Release: Custom CSS Selector Bridge & XPath 2.0 Support',
-    status: 'seeded_initial',
-    reason: 'Marked seen on initial feed registration (seed_only policy)',
-    processedAt: '2026-10-20T09:00:00Z',
-  },
-  {
-    guid: 'https://news.ycombinator.com/item?id=41981905',
-    hashId: computeDeterministicHash('https://news.ycombinator.com/item?id=41981905'),
-    feedId: 'feed-hn-frontpage',
-    title: 'Sponsored Webinar: Boost Enterprise Cloud Spend Efficiency by 10x Today',
-    status: 'filtered_out',
-    reason: 'Triggered blacklist keyword: sponsored, webinar',
-    processedAt: '2026-10-26T15:00:00Z',
-  },
-];
+export const INITIAL_SEEN_STATE: SeenEntry[] = [];

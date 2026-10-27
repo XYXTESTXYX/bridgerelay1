@@ -4,6 +4,8 @@ import {
   evaluateFilterRules,
   renderFormattedPreview,
   INITIAL_BRIDGE_FEEDS,
+  NormalizedFeedItem,
+  MediaEnclosure,
 } from '@/lib/pipeline-engine';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +40,8 @@ export async function GET(req: NextRequest) {
       });
 
       if (!pollRes.ok) continue;
-      const { items } = await pollRes.json();
+      const data = (await pollRes.json()) as { items?: NormalizedFeedItem[] };
+      const items: NormalizedFeedItem[] = data.items || [];
 
       for (const item of items) {
         if (isItemSeen(item.hashId)) continue;
@@ -99,7 +102,7 @@ export async function GET(req: NextRequest) {
             actionType: item.enclosures.length > 0 ? 'image' : 'text',
             mastodonPosts: mastoPreview.posts,
             threadsPosts: threadsPreview.posts,
-            mediaUrls: item.enclosures.map((e) => e.url),
+            mediaUrls: item.enclosures.map((e: MediaEnclosure) => e.url),
           }),
         });
 

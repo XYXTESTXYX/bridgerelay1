@@ -1,0 +1,3 @@
+git add postcss.config.mjs package.json
+git commit -m "Fix PostCSS config and add autoprefixer"
+git push
